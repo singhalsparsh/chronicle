@@ -1,0 +1,187 @@
+{
+  "project": {
+    "name": "Core-Payments-Service",
+    "departingLead": "@alex_dev",
+    "reason": "Alex is moving to Platform Engineering; ownership of Core Payments transfers mid-May."
+  },
+  "gaps": [
+    {
+      "id": "gap-1",
+      "title": "SQS dead-letter consumer loop is not deployed",
+      "description": "GH-PR-95 is open; the consumer polling loop in src/workers/retry.ts is commented out, so failed webhooks are not yet draining from the DLQ.",
+      "sourceIds": ["GH-PR-95"],
+      "questions": [
+        "What blocks uncommenting and deploying the SQS dead-letter consumer loop?",
+        "Who owns merging the consumer PR and wiring the DLQ alarm?",
+        "What metric should gate cutover to the async consumer?"
+      ],
+      "suggestedAnswers": [
+        "The DLQ alarm and retry DL policy need wiring first",
+        "@sparsh_s, with review from @alex_dev",
+        "DLQ depth greater than 0 sustained for 5 minutes"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "id": "DOC-02",
+      "type": "NOTION_DOC",
+      "title": "Authentication & Session Design",
+      "author": "@alex_dev",
+      "createdAt": "2026-04-02T09:30:00Z",
+      "accessTier": 1,
+      "metadata": { "url": "https://notion.so/core-payments/auth-design" },
+      "rawContent": "Authentication uses stateless RS256 JWT tokens with 24h expiry. Tokens carry the role claim and are verified by a shared public key pinned in each service. We chose stateless tokens to keep the auth service simple. There is an open question about whether we need server-side revocation for admin-level tokens; the current design accepts that risk because revocation was out of scope for Q1.",
+      "facts": [
+        {
+          "category": "DECISION",
+          "title": "Session auth uses stateless RS256 JWT",
+          "summary": "Authentication uses stateless RS256 JWT tokens with a 24h expiry; revocation is out of scope.",
+          "verbatimQuote": "Authentication uses stateless RS256 JWT tokens with 24h expiry.",
+          "conflictGroup": "session-auth",
+          "stance": "STATELESS_JWT"
+        },
+        {
+          "category": "RISK",
+          "title": "No server-side token revocation",
+          "summary": "Stateless JWTs cannot be revoked; admin tokens carry that risk until a session store is introduced.",
+          "verbatimQuote": "There is an open question about whether we need server-side revocation for admin-level tokens; the current design accepts that risk because revocation was out of scope for Q1."
+        }
+      ]
+    },
+    {
+      "id": "GH-PR-84",
+      "type": "GITHUB_PR",
+      "title": "feat: replace JWT middleware with ioredis sliding sessions",
+      "author": "@alex_dev",
+      "createdAt": "2026-05-04T10:41:00Z",
+      "accessTier": 2,
+      "metadata": { "url": "https://github.com/corepayments/payments-service/pull/84", "status": "merged" },
+      "rawContent": "Replaced stateless JWT middleware with ioredis sliding session store (TTL 3600s) because stateless tokens could not be revoked during the May 2 rate-limit incident. The middleware now checks the session store on every authenticated request. The PR also adds a session revocation endpoint for admins. Deployed to production on May 5.",
+      "facts": [
+        {
+          "category": "DECISION",
+          "title": "Session store migration to ioredis sliding sessions",
+          "summary": "Auth was migrated from stateless JWTs to an ioredis sliding session store with a 3600s TTL and admin revocation support.",
+          "verbatimQuote": "Replaced stateless JWT middleware with ioredis sliding session store (TTL 3600s) because stateless tokens could not be revoked during the May 2 rate-limit incident.",
+          "conflictGroup": "session-auth",
+          "stance": "IOREDIS_SESSION"
+        }
+      ]
+    },
+    {
+      "id": "DOC-04",
+      "type": "NOTION_DOC",
+      "title": "Webhook Reliability Design",
+      "author": "@alex_dev",
+      "createdAt": "2026-04-10T14:05:00Z",
+      "accessTier": 1,
+      "metadata": { "url": "https://notion.so/core-payments/webhooks" },
+      "rawContent": "Failed Stripe webhooks are retried synchronously up to 3 times via exponential backoff in the API route. This keeps ordering simple but adds latency to the webhook endpoint. Stripe requires acknowledgment within 10 seconds, so the third retry typically happens before a response is returned. If all retries fail we drop the event; a dead-letter queue was being evaluated for Q2.",
+      "facts": [
+        {
+          "category": "DECISION",
+          "title": "Webhook retries are synchronous in the API route",
+          "summary": "Failed Stripe webhooks are retried synchronously up to 3 times with exponential backoff inside the API route.",
+          "verbatimQuote": "Failed Stripe webhooks are retried synchronously up to 3 times via exponential backoff in the API route.",
+          "conflictGroup": "webhook-retries",
+          "stance": "SYNC_RETRY"
+        }
+      ]
+    },
+    {
+      "id": "GH-PR-91",
+      "type": "GITHUB_PR",
+      "title": "feat: async webhook retries via SQS DLQ",
+      "author": "@sparsh_s",
+      "createdAt": "2026-05-08T13:26:00Z",
+      "accessTier": 2,
+      "metadata": { "url": "https://github.com/corepayments/payments-service/pull/91", "status": "open" },
+      "rawContent": "Moved failed Stripe webhooks to asynchronous AWS SQS dead-letter queue (payments-dlq.fifo). This branch replaces the synchronous retry path and keeps ordering guarantees via the FIFO queue. Needs one more approval before merge.",
+      "facts": [
+        {
+          "category": "DECISION",
+          "title": "Webhook retries move to async SQS DLQ",
+          "summary": "Failed Stripe webhooks move to an async SQS dead-letter queue (payments-dlq.fifo), replacing synchronous retries.",
+          "verbatimQuote": "Moved failed Stripe webhooks to asynchronous AWS SQS dead-letter queue (payments-dlq.fifo).",
+          "conflictGroup": "webhook-retries",
+          "stance": "ASYNC_SQS"
+        }
+      ]
+    },
+    {
+      "id": "GH-PR-95",
+      "type": "GITHUB_PR",
+      "title": "feat: SQS dead-letter consumer (WIP)",
+      "author": "@sparsh_s",
+      "createdAt": "2026-05-09T09:12:00Z",
+      "accessTier": 2,
+      "metadata": { "url": "https://github.com/corepayments/payments-service/pull/95", "status": "open" },
+      "rawContent": "Adds the SQS dead-letter consumer for payments-dlq.fifo. The consumer polling loop in src/workers/retry.ts is commented out until review completes. This is the remaining work to close out the async webhook retry project.",
+      "facts": [
+        {
+          "category": "UNFINISHED",
+          "title": "SQS consumer loop commented out",
+          "summary": "The consumer polling loop in src/workers/retry.ts is commented out pending review.",
+          "verbatimQuote": "The consumer polling loop in src/workers/retry.ts is commented out until review completes.",
+          "gapId": "gap-1"
+        }
+      ]
+    },
+    {
+      "id": "SLK-240",
+      "type": "SLACK_THREAD",
+      "title": "#security — rate-limiter bypass list",
+      "author": "@ujjwal_t",
+      "createdAt": "2026-05-06T15:20:00Z",
+      "accessTier": 3,
+      "metadata": {},
+      "rawContent": "Security note on the rate limiter: the bypass list currently includes internal IP subnet 10.24.0.0/16 in config/whitelist.json. This is confidential until we rewrite the batch worker egress. Keep it out of external docs for now.",
+      "facts": [
+        {
+          "category": "RISK",
+          "title": "Rate-limiter bypass list hardcodes internal subnet",
+          "summary": "The rate-limiter bypass list hardcodes internal IP subnet 10.24.0.0/16 in config/whitelist.json.",
+          "verbatimQuote": "the bypass list currently includes internal IP subnet 10.24.0.0/16 in config/whitelist.json"
+        }
+      ]
+    },
+    {
+      "id": "JIRA-419",
+      "type": "JIRA_TICKET",
+      "title": "DEPRECATE: v1 /api/charge",
+      "author": "@alex_dev",
+      "createdAt": "2026-05-02T12:11:00Z",
+      "accessTier": 1,
+      "metadata": { "status": "In Progress" },
+      "rawContent": "Deprecate the legacy v1 /api/charge endpoint. The endpoint still receives traffic from at least one external merchant client. No cutover date is scheduled until that client list is confirmed by Merchant Platform.",
+      "facts": [
+        {
+          "category": "UNFINISHED",
+          "title": "v1 /api/charge deprecation unscheduled",
+          "summary": "v1 /api/charge still receives traffic and has no scheduled cutover until Merchant Platform confirms the client list.",
+          "verbatimQuote": "No cutover date is scheduled until that client list is confirmed by Merchant Platform."
+        }
+      ]
+    },
+    {
+      "id": "DOC-01",
+      "type": "NOTION_DOC",
+      "title": "Core Payments Service — System Architecture",
+      "author": "@alex_dev",
+      "createdAt": "2026-03-15T10:12:00Z",
+      "accessTier": 2,
+      "metadata": { "url": "https://notion.so/core-payments/architecture" },
+      "rawContent": "Core Payments Service runs on AWS ECS Fargate behind an ALB. Deployment uses one ECS service per module with rolling deployments on Tuesdays. Secrets live in AWS Secrets Manager and are injected at task start. For anything infrastructure-related, talk to @ujjwal_t.",
+      "facts": [
+        {
+          "category": "CONTACT",
+          "title": "Who to ask about deployment and infra",
+          "summary": "@ujjwal_t owns ECS, networks, and all infrastructure changes for Core Payments.",
+          "verbatimQuote": "For anything infrastructure-related, talk to @ujjwal_t.",
+          "suggests": "@ujjwal_t"
+        }
+      ]
+    }
+  ]
+}
