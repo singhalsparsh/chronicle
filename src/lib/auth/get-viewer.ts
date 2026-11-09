@@ -2,9 +2,9 @@
  * Chronicle — Session-bound viewer (E-1b).
  *
  * The ONLY source of tier in the app. A signed `chronicle_session` cookie is
- * verified on every read; there is no default tier and `x-viewer-tier` (the
- * old client-selected header) is never read. Rejects tampered, unsigned, or
- * malformed cookies by treating them as unauthenticated.
+ * verified on every read; there is no default tier and the legacy client-
+ * selected tier header is never read. Rejects tampered, unsigned, or malformed
+ * cookies by treating them as unauthenticated.
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { getUserById } from "./demo-users";
@@ -39,7 +39,25 @@ export function createSessionToken(userId: string): string {
   return `${payload}.${sign(payload)}`;
 }
 
+/**
+ * In-memory revocation set for logged-out session tokens. Stateless HMAC
+ * cookies cannot be invalidated server-side without a store, so logout adds the
+ * exact token here; verification rejects it. Cleared on server restart, which
+ * is consistent with the in-memory demo persistence.
+ */
+const revokedTokens = new Set<string>();
+
+export function revokeSessionToken(token: string): void {
+  if (token) revokedTokens.add(token);
+}
+
+export function readSessionToken(req: Request): string | null {
+  const cookieHeader = req.headers.get("cookie") ?? "";
+  return parseCookies(cookieHeader)[SESSION_COOKIE] ?? null;
+}
+
 export function parseSessionToken(token: string): { userId: string; issuedAt: number } | null {
+  if (revokedTokens.has(token)) return null;
   const parts = token.split(".");
   if (parts.length !== 3) return null;
   const [userId, issuedAtStr, sig] = parts;

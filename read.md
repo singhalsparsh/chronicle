@@ -10,8 +10,9 @@ Chronicle is a Next.js 16 (App Router, TypeScript, Tailwind v4, shadcn/ui Base U
 software project from raw artifacts (GitHub PRs, Slack threads, Jira tickets, Notion docs) and hands
 it off to an incoming owner with role-based visibility, quote-grounded citations, and an audit trail.
 
-There is **no login wall** â€” judges land directly in the interactive workspace, pre-seeded with a
-8-artifact synthetic dataset for `Core-Payments-Service`.
+Entry is a one-click demo identity (Alex T3 / Sam T2 / Jordan T1) bound to a signed session cookie;
+no passwords. The workspace is pre-seeded with an 8-artifact synthetic dataset for
+`Core-Payments-Service`.
 
 ### Round 3 features (implemented)
 
@@ -133,9 +134,9 @@ falls back to the deterministic path; the demo never depends on it.
   per IP â€” the route degrades to the pasted text with `github.fetched: false`.
 - **Voice transcription**: `src/types/speech.d.ts` types `window.SpeechRecognition`; the mic UI
   lives in `stage-review.tsx` (`toggleMicrophone`). Browsers without the API get a toast + typing.
-- **Change tiers**: tiers live in `src/lib/types.ts` (`TIER_VALUES`). Viewer tiers are sent by the
-  client as `x-viewer-tier` header (1/2/3); server-side filtering happens in
-  `project-store.ts â†’ filterState()`.
+- **Change tiers**: tiers live in `src/lib/types.ts` (`TIER_VALUES`). Viewer tier is derived
+  server-side from the signed session cookie (`src/lib/auth/get-viewer.ts`), never from client
+  input; filtering happens in `project-store.ts → filterState()`.
 - **Change the UI**: stages are separate components in `src/components/stage-*.tsx`, all driven by
   `workspace-context.tsx`. The shadcn/ui primitives in `src/components/ui/*` are Base UI
   (`@base-ui/react`) â€” use `render={<Comp />}` instead of Radix-style `asChild`.

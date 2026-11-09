@@ -24,7 +24,7 @@ grounding, regex secret scrubbing, RBAC tier filtering, and a hybrid persistence
 | Planted contradictions | 2 (`session auth`, `webhook retries`) |
 | Missing-evidence flags | 1 (SQS DLQ consumer) |
 | Confidential tier sources | 1 (`SLK-240` rate-limiter bypass list) |
-| Auth | None — zero login wall, judges land in an active workspace |
+| Auth | 3 demo identities, session-cookie bound; no passwords |
 | Build | `npm run build` passes with zero TypeScript / ESLint errors |
 
 ---
@@ -32,11 +32,12 @@ grounding, regex secret scrubbing, RBAC tier filtering, and a hybrid persistence
 ## 2. Live End-to-End Judge Walkthrough
 
 1. **Open the deployed link.** You land in the Chronicle workspace for `Core-Payments-Service`
-   with 8 sources pre-loaded. No sign-in, no empty dashboard.
+   with 8 sources pre-loaded. One-click "Enter as …" (Alex T3 / Sam T2 / Jordan T1); no password.
 2. **Stage 01 — Connect.** Explore all 8 sources (search + type filters), or paste your own GitHub
    PR / Slack thread / Jira ticket / Notion doc text with a raw key like `sk-live-...` or
    `ghp_...`. Press **Scrub & ingest** — the result card reports secrets redacted with matched
-   types, and the source is stored sanitized.
+   types; the scrubbed text is what is stored and served — the raw archive is never exposed at the
+   API boundary.
 3. **Stage 02 — Reconstruct.** Click **Reconstruct & Verify Project State**. Chronicle builds the
    chronological claim graph: Decisions, Unfinished Work, Risks/Blockers, Dependencies, Who-to-Ask,
    First-7-Days Next Actions, ordered by source timestamp.
@@ -89,9 +90,9 @@ grounding, regex secret scrubbing, RBAC tier filtering, and a hybrid persistence
 ```
 
 **Data flow:** seed JSON → normalize (scrub secrets, Zod-validate) → `ReconstructionResult`
-(claims, conflicts, gaps, next actions) → persisted snapshot → per-request viewer filter by
-`x-viewer-tier` header → UI. Every mutation (ingest, reconstruct, verify, resolve, interview, lock,
-receipt) writes through `ProjectStore` and returns the fresh filtered state to the client.
+(claims, conflicts, gaps, next actions) → persisted snapshot → per-request viewer filter derived
+from the signed session cookie → UI. Every mutation (ingest, reconstruct, verify, resolve, interview,
+lock, receipt) writes through `ProjectStore` and returns the fresh filtered state to the client.
 
 ---
 
@@ -100,12 +101,15 @@ receipt) writes through `ProjectStore` and returns the fresh filtered state to t
 ### 4.1 API routes
 | Route | Method | Behaviour |
 | --- | --- | --- |
-| `/api/ingest` | POST | Regex-scrubs secrets → Zod-validates → stores artifact; returns sanitized source + redaction stats |
+| `/api/ingest` | POST | Requires session. Scrubs secrets on write → Zod-validates → stores scrubbed artifact; returns public source (`rawContent` omitted) + redaction stats |
 | `/api/reconstruct` | GET | Role-filtered workspace state |
 | `/api/reconstruct` | POST | Re-runs reconstruction (`withVerify` optional) |
 | `/api/verify` | POST | Programmatic quote grounding; downgrades unverifiable claims |
 | `/api/handover` | GET | Role-filtered handover bundle (snapshot, next actions, audit tail) |
-| `/api/handover` | POST | `resolve_conflict`, `submit_interview`, `edit_claim`, `lock_snapshot`, `acknowledge_receipt`, `reset_demo` |
+| `/api/handover` | POST | `resolve_conflict`, `submit_interview`, `edit_claim`, `lock_snapshot`, `acknowledge_receipt`, `reset_demo`; tier-scoped mutations reject with 403 |
+| `/api/session` | POST | Demo login `{ userId }` → sets signed `chronicle_session` cookie (httpOnly) |
+| `/api/session` | GET | Current viewer or `{ user: null }` (never 401) |
+| `/api/session/logout` | POST | Clears session cookie |
 
 All routes return a deterministic error envelope `{ error: { code, message, details? } }`.
 
@@ -132,22 +136,27 @@ Slack thread (`SLK-240`) for role-filter demos.
 - **Regex Secret Scrubber** (`secret-scrubber.ts`): single-pass combined regex for OpenAI/Stripe
   keys, GitHub tokens, AWS access keys, Postgres URIs, emails → `[REDACTED_SECRET]` with counts +
   matched types.
+- **Scrub-on-write + outbound DTO** (`public-dto.ts`): artifacts are scrubbed on write — the
+  stored `rawContent` is the scrubbed text, and `rawContent` is never serialized to clients.
+  `sanitizedContent` and `rawContent` are equal by invariant post-ingest.
 - **RBAC filter** (`rbac-filter.ts`): clearance hierarchy T1=1 / T2=2 / T3=3;
   `filterSourcesByClearance` (pre-LLM/pre-render), `computeClaimAccessTier` = max(citation tier),
-  `filterClaimsByClearance` with withheld stats. Enforced server-side via the `x-viewer-tier` header.
+  `filterClaimsByClearance` with withheld stats. Enforced via a signed session cookie; the server
+  derives the viewer tier from the session and ignores any client-supplied tier header, query
+  parameter, or body field. Logout revokes the session token in memory.
 - **Citation verifier** (`citation-verifier.ts`): source existence + normalized-substring check;
   auto-downgrade to `MISSING_EVIDENCE` unless `HUMAN_APPROVED`.
 - **Supabase RLS** (`supabase/migrations/001_init_schema.sql`): per-table policies tier-gated by a
   `viewer_tier` JWT claim, service-role writes, indexes on filtered columns.
 
 ### 4.6 Feature checklist
-- [x] Zero-login workspace pre-loaded with 8 artifacts (1-click guided 5-stage progression)
+- [x] One-click demo-identity entry (Alex T3 / Sam T2 / Jordan T1); workspace pre-loaded with 8 artifacts
 - [x] Custom source ingestion with visible Regex secret scrubber
 - [x] Chronological reconstruction into 6 categories
 - [x] Citation badges opening an evidence drawer with verbatim highlight
 - [x] `CONFLICT DETECTED` cards with 3 live resolution paths
 - [x] `MISSING EVIDENCE` flags with 3-question exit micro-interview (+ quick-fill)
-- [x] Shadow Role Preview Switcher (T1/T2/T3) — deterministic real-time filtering
+- [x] Session switcher (Alex/Sam/Jordan) — identity switch re-binds the session; server-filtered state refetched
 - [x] Snapshot lock & publish (v1.0 digest) + handover receipt acknowledgement
 - [x] Timestamped audit log for every action
 - [x] Hybrid Supabase + pre-seeded stateful persistence
@@ -175,6 +184,27 @@ Slack thread (`SLK-240`) for role-filter demos.
    (claims/sources are), keeping RBAC demonstrations unambiguous.
 6. **Role switcher refetches server-filtered state** rather than client-side hiding — this makes
    the RBAC layer genuinely server-enforced and provable.
+7. **Session-bound demo identities.** Round 1 planned Supabase Auth. Round 2 delivers three demo
+   identities with HMAC-signed session cookies. Not production auth; demo users are known and a
+   viewer can switch identity by logging in as a different demo user. Tier is server-derived from
+   the session and cannot be overridden by client input.
+
+### 5.1 Disclosed limitations
+
+(a) Authentication is a demo mechanism: three hardcoded identities with signed cookies. There is no
+    password, no user management, and a viewer can switch identity by logging in as a different demo
+    user. The permission model is enforced server-side per session and cannot be overridden by client
+    headers or query parameters.
+
+(b) Artifacts are append-only by design. There is no delete/deprecate API; sources cannot be removed
+    from the archive. This is a deliberate choice to preserve an immutable evidence chain — not a
+    missing feature. Modelling a source that disappears from the archive is out of scope for this
+    build.
+
+(c) Conflict discovery is limited to the seeded/known conflict groups. The deterministic extractor
+    does not auto-generate conflict cards for arbitrary contradictions introduced via custom
+    ingestion. LLM-assisted conflict discovery exists as an optional path and is exercised only when
+    the LLM provider is configured; it is not part of the default deterministic demo.
 
 ---
 
@@ -194,6 +224,12 @@ All checks run against the production build (`npm run build` → `npm run start`
 | Exit interview | POST `submit_interview` (3 answers) | ✓ gap status → `HUMAN_APPROVED`, open gaps 3 → 2 |
 | Snapshot + receipt | POST `lock_snapshot` → `acknowledge_receipt` | ✓ locked w/ digest, receipt acked by actor, audit entries present |
 | Page render | GET `/` | ✓ 200, Chronicle UI served |
+| Unauthenticated data route → 401 | GET `/api/reconstruct` (no cookie) | ✓ 401 `UNAUTHORIZED` envelope |
+| Attack: `x-viewer-tier: 3` header with a T1 session → ignored; response identical to T1 baseline | GET `/api/reconstruct` w/ jordan cookie + attack header | ✓ byte-identical diff (empty) |
+| Attack: export as T1 → no T3 content, no raw secrets | GET `/api/handover/export` w/ jordan cookie | ✓ no `SLK-240`, no secret patterns in markdown |
+| Tampered cookie → rejected as unauthenticated | flipped signature bit | ✓ data routes 401; `GET /api/session` → `{ user: null }` |
+| Raw secrets grep across `/api/reconstruct` (seed + ingest) → zero matches | grep on wire JSON | ✓ no `sk-live`, `ghp_`, `postgresql://`, emails; redaction stats present |
+| Mutation tier guard: T1 resolving a T2 conflict → 403 | POST `resolve_conflict CT-001` as jordan | ✓ 403 `FORBIDDEN` |
 
 ---
 
@@ -211,6 +247,10 @@ Eight findings from an external audit were remediated:
 | F | Docs (28) vs seed (8) mismatch | Docs updated; seed is 8 sources / 1 gap; counts verified by runtime checks. |
 | G | JSON-blob + service-role persistence | New relational persistence (`supabase-persistence.ts`) writes per-entity tables with optimistic `state_meta` CAS; migration `002_relational_persistence_rls.sql` adds tables + user-level RLS write policies. |
 | H | DJB2 32-bit digest | SHA-256 digest over a canonical, stable-ordered projection (64 hex chars). |
+| E-1a | Secrets leaked via `rawContent` at the API boundary | Scrub on write (`rawContent === sanitizedContent`) + central outbound DTO strips `rawContent` from every payload. |
+| E-1b | No auth; tier client-selected, default 3 | Signed session cookie (`chronicle_session`, HMAC-SHA256); tier derived server-side; all data routes 401 without a session; entry screen + session switcher. |
+| E-2 | Mutations not tier-scoped | Tier guards on resolve/edit/interview (403) and verify scoped to viewer clearance, using existing `computeClaimAccessTier`. |
+| E-3 | Export lacked verbatim quotes | §2 now lists `- [SOURCE_ID] "quote"` per claim. |
 
 To activate relational persistence, run `supabase/migrations/002_relational_persistence_rls.sql` in your Supabase project (after 001). Without it, the app gracefully falls back to the in-memory store and keeps working.
 
