@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test:smoke": "node scripts/smoke-test.mjs",
-    "test:ui": "node scripts/ui-test.mjs"
+    "test:ui": "node scripts/ui-test.mjs",
+    "test:integrations": "node scripts/test-integrations.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
