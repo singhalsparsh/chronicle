@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { IngestRequestSchema } from "@/lib/schemas/handover-zod";
 import { getProjectStore } from "@/lib/store/project-store";
-import { isErrorResponse, jsonError, parseJsonBody, viewerTierFromRequest } from "@/lib/api/helpers";
+import { isErrorResponse, jsonError, parseJsonBody } from "@/lib/api/helpers";
 import { toPublicSource, toPublicState } from "@/lib/api/public-dto";
 import { enrichGithubPr, isGithubPrUrl } from "@/lib/engine/github-ingest";
+import { getViewer } from "@/lib/auth/get-viewer";
 
 /**
  * POST /api/ingest
@@ -12,6 +13,9 @@ import { enrichGithubPr, isGithubPrUrl } from "@/lib/engine/github-ingest";
  * 2. Scrubs secrets (regex), validates via Zod, stores the source artifact.
  */
 export async function POST(request: Request) {
+  const viewer = await getViewer(request);
+  if (!viewer) return jsonError(401, "UNAUTHORIZED", "Sign in as a demo user first.");
+
   const body = await parseJsonBody<{
     title?: unknown;
     sourceType?: unknown;
@@ -52,16 +56,19 @@ export async function POST(request: Request) {
   try {
     const store = getProjectStore();
     const input = parsed.data;
-    const { source, scrub } = await store.ingestSource({
-      title: input.title,
-      sourceType: input.sourceType,
-      author: input.author,
-      rawText: input.rawText,
-      accessTier: input.accessTier,
-      url: input.url,
-    });
+    const { source, scrub } = await store.ingestSource(
+      {
+        title: input.title,
+        sourceType: input.sourceType,
+        author: input.author,
+        rawText: input.rawText,
+        accessTier: input.accessTier,
+        url: input.url,
+      },
+      `${viewer.name} (${viewer.id})`
+    );
 
-    const state = await store.getViewerState(viewerTierFromRequest(request));
+    const state = await store.getViewerState(viewer.tier);
     return NextResponse.json({
       ok: true,
       source: toPublicSource(source),

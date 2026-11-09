@@ -10,7 +10,7 @@ import { useWorkspace, STAGES } from "@/lib/workspace-context";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const GUIDANCE: Record<number, string> = {
-  1: "Explore the 28 pre-loaded artifacts or paste a custom source; secrets are scrubbed automatically before storage.",
+  1: "Explore the 8 pre-loaded artifacts or paste a custom source; secrets are scrubbed on write — stored and served text is already scrubbed.",
   2: "Click “Reconstruct & Verify Project State” to extract the chronological claim graph from the evidence.",
   3: "Review programmatic quote grounding; every citation must resolve to a verbatim substring of its source.",
   4: "Resolve detected contradictions and answer the 3-question exit interviews to approve missing evidence.",
@@ -71,7 +71,7 @@ export function WorkspaceClient() {
       <footer className="border-t border-border px-4 py-3 lg:px-6">
         <p className="text-center text-[11px] text-muted-foreground">
           Chronicle · Evidence-Linked Project State Reconstruction &amp; Permissioned Handover · synthetic
-          judge dataset · no login required
+          judge dataset · demo identities (no passwords)
         </p>
       </footer>
       <CitationInspectorDrawer />

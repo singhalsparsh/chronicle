@@ -281,14 +281,18 @@ export class ProjectStore {
     return this.filterState(viewerTier);
   }
 
-  async ingestSource(input: {
-    title: string;
-    sourceType: SourceArtifact["type"];
-    author: string;
-    rawText: string;
-    accessTier?: AccessTier;
-    url?: string;
-  }): Promise<{ source: SourceArtifact; scrub: { redactionCount: number; matchedTypes: string[] } }> {
+  async ingestSource(
+    input: {
+      title: string;
+      sourceType: SourceArtifact["type"];
+      author: string;
+      rawText: string;
+      accessTier?: AccessTier;
+      url?: string;
+    },
+    actor?: string
+  ): Promise<{ source: SourceArtifact; scrub: { redactionCount: number; matchedTypes: string[] } }> {
+    const auditActor = actor ?? this.actorForTier(3);
     let created: SourceArtifact = null as never;
     let scrub: { redactionCount: number; matchedTypes: string[]; sanitizedText: string } = {
       redactionCount: 0,
@@ -321,12 +325,12 @@ export class ProjectStore {
       // Deterministic candidate extraction: custom sources always yield usable
       // candidate facts even when the LLM reconstruction path is unavailable.
       state.factsBySource[id] = extractCandidateFacts(created);
-      this.logRaw(state, "SOURCE_INGESTED", this.actorForTier(3), `${id} · ${input.title} (${input.sourceType})`);
+      this.logRaw(state, "SOURCE_INGESTED", auditActor, `${id} · ${input.title} (${input.sourceType})`);
       if (scrub.redactionCount > 0) {
         this.logRaw(
           state,
           "SECRET_REDACTED",
-          this.actorForTier(3),
+          auditActor,
           `${scrub.redactionCount} secret(s) scrubbed in ${id}: ${scrub.matchedTypes.join(", ")}`
         );
       }
@@ -335,7 +339,8 @@ export class ProjectStore {
     return { source: created, scrub };
   }
 
-  async reconstruct(viewerTier: AccessTier): Promise<void> {
+  async reconstruct(viewerTier: AccessTier, actor?: string): Promise<void> {
+    const auditActor = actor ?? this.actorForTier(viewerTier);
     await this.mutate(async (state) => {
       const { visibleSources } = filterSourcesByClearance(state.sources, viewerTier);
       const visibleIds = new Set(visibleSources.map((s) => s.id));
@@ -371,24 +376,29 @@ export class ProjectStore {
       this.logRaw(
         state,
         "RECONSTRUCT_COMPLETED",
-        this.actorForTier(viewerTier),
+        auditActor,
         `tier=${viewerTier} · ${result.claims.length} claims · ${result.conflicts.length} conflicts · ${result.gaps.length} gaps (heuristic/LLM on visible sources)`
       );
     });
   }
 
-  async verify(viewerTier: AccessTier, claimIds?: string[]): Promise<{ downgraded: number; verified: number }> {
+  async verify(
+    viewerTier: AccessTier,
+    claimIds?: string[],
+    actor?: string
+  ): Promise<{ downgraded: number; verified: number }> {
+    const auditActor = actor ?? this.actorForTier(viewerTier);
     let result = { verified: 0, downgraded: 0 };
     await this.mutate((state) => {
       const targets = claimIds?.length
-        ? state.claims.filter((c) => claimIds.includes(c.id))
-        : state.claims;
+        ? state.claims.filter((c) => claimIds.includes(c.id) && c.accessTier <= viewerTier)
+        : state.claims.filter((c) => c.accessTier <= viewerTier);
       const { verified, downgraded } = verifyClaims(targets, state.sources);
       result = { verified, downgraded };
       this.logRaw(
         state,
         "VERIFICATION_COMPLETED",
-        this.actorForTier(viewerTier),
+        auditActor,
         `${verified} claims quote-grounded · ${downgraded} downgraded to MISSING_EVIDENCE`
       );
     });
@@ -399,8 +409,10 @@ export class ProjectStore {
     viewerTier: AccessTier,
     conflictId: string,
     choice: Exclude<ConflictResolution, "UNRESOLVED">,
-    note?: string
+    note?: string,
+    actor?: string
   ): Promise<void> {
+    const auditActor = actor ?? this.actorForTier(viewerTier);
     await this.mutate((state) => {
       const conflict = state.conflicts.find((c) => c.id === conflictId);
       if (!conflict) throw new Error(`conflict not found: ${conflictId}`);
@@ -424,13 +436,14 @@ export class ProjectStore {
       this.logRaw(
         state,
         "CONFLICT_RESOLVED",
-        this.actorForTier(viewerTier),
+        auditActor,
         `${conflictId} · ${conflict.subject} → ${choice} · ${losingClaimId} superseded${note ? ` · ${note}` : ""}`
       );
     });
   }
 
-  async submitInterview(viewerTier: AccessTier, gapId: string, answers: string[]): Promise<void> {
+  async submitInterview(viewerTier: AccessTier, gapId: string, answers: string[], actor?: string): Promise<void> {
+    const auditActor = actor ?? this.actorForTier(viewerTier);
     await this.mutate((state) => {
       const gap = state.gaps.find((g) => g.id === gapId);
       if (!gap) throw new Error(`gap not found: ${gapId}`);
@@ -447,13 +460,14 @@ export class ProjectStore {
       this.logRaw(
         state,
         "INTERVIEW_COMPLETED",
-        this.actorForTier(viewerTier),
+        auditActor,
         `${gapId} · ${gap.title} → ${gap.status}`
       );
     });
   }
 
-  async editClaim(viewerTier: AccessTier, claimId: string, summary: string): Promise<void> {
+  async editClaim(viewerTier: AccessTier, claimId: string, summary: string, actor?: string): Promise<void> {
+    const auditActor = actor ?? this.actorForTier(viewerTier);
     await this.mutate((state) => {
       const claim = state.claims.find((c) => c.id === claimId);
       if (!claim) throw new Error(`claim not found: ${claimId}`);
@@ -464,39 +478,41 @@ export class ProjectStore {
       this.logRaw(
         state,
         "CLAIM_EDITED",
-        this.actorForTier(viewerTier),
+        auditActor,
         `${claimId} · summary edited`
       );
     });
   }
 
-  async lockSnapshot(viewerTier: AccessTier): Promise<HandoverSnapshot> {
+  async lockSnapshot(viewerTier: AccessTier, actor?: string): Promise<HandoverSnapshot> {
+    const auditActor = actor ?? this.actorForTier(viewerTier);
     await this.mutate((state) => {
       if (state.handover.locked) return;
       state.handover.version = "v1.0";
       state.handover.locked = true;
       state.handover.lockedAt = new Date().toISOString();
       state.handover.digest = computeDigest(state);
-      this.logRaw(state, "SNAPSHOT_LOCKED", this.actorForTier(viewerTier), "Snapshot v1.0 locked & published");
+      this.logRaw(state, "SNAPSHOT_LOCKED", auditActor, "Snapshot v1.0 locked & published");
     });
     return this.state!.handover;
   }
 
-  async acknowledgeReceipt(viewerTier: AccessTier): Promise<HandoverSnapshot> {
+  async acknowledgeReceipt(viewerTier: AccessTier, actor?: string): Promise<HandoverSnapshot> {
+    const auditActor = actor ?? this.actorForTier(viewerTier);
     await this.mutate((state) => {
       if (!state.handover.locked) throw new Error("snapshot must be locked before receipt acknowledgement");
       if (state.handover.receiptAcknowledged) return;
       state.handover.receiptAcknowledged = true;
       state.handover.receiptAcknowledgedAt = new Date().toISOString();
-      state.handover.ackActor = this.actorForTier(viewerTier);
-      this.logRaw(state, "RECEIPT_ACKNOWLEDGED", this.actorForTier(viewerTier), "Handover receipt acknowledged");
+      state.handover.ackActor = auditActor;
+      this.logRaw(state, "RECEIPT_ACKNOWLEDGED", auditActor, "Handover receipt acknowledged");
     });
     return this.state!.handover;
   }
 
-  async resetDemo(viewerTier: AccessTier): Promise<void> {
+  async resetDemo(viewerTier: AccessTier, actor?: string): Promise<void> {
     await this.mutate((state) => {
-      this.logRaw(state, "DEMO_RESET", this.actorForTier(viewerTier), "workspace reset to synthetic baseline");
+      this.logRaw(state, "DEMO_RESET", actor ?? this.actorForTier(viewerTier), "workspace reset to synthetic baseline");
     });
     const fresh = buildSeedState();
     this.state = fresh;

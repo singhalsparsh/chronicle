@@ -1,18 +1,22 @@
 import { NextResponse } from "next/server";
 import { HandoverRequestSchema } from "@/lib/schemas/handover-zod";
 import { getProjectStore } from "@/lib/store/project-store";
-import { isErrorResponse, jsonError, parseJsonBody, viewerTierFromRequest } from "@/lib/api/helpers";
+import { isErrorResponse, jsonError, parseJsonBody } from "@/lib/api/helpers";
 import { toPublicState } from "@/lib/api/public-dto";
+import { getViewer } from "@/lib/auth/get-viewer";
 
 /**
  * GET /api/handover — returns the role-filtered handover bundle.
  * POST /api/handover — mutation actions: resolve_conflict | submit_interview |
  *   edit_claim | lock_snapshot | acknowledge_receipt | reset_demo.
+ * Both require a valid signed session; tier comes from the session only.
  */
 export async function GET(request: Request) {
+  const viewer = await getViewer(request);
+  if (!viewer) return jsonError(401, "UNAUTHORIZED", "Sign in as a demo user first.");
   try {
     const store = getProjectStore();
-    const state = await store.getViewerState(viewerTierFromRequest(request));
+    const state = await store.getViewerState(viewer.tier);
     return NextResponse.json({
       ok: true,
       handover: state.handover,
@@ -29,6 +33,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const viewer = await getViewer(request);
+  if (!viewer) return jsonError(401, "UNAUTHORIZED", "Sign in as a demo user first.");
+
   const body = await parseJsonBody<unknown>(request);
   if (isErrorResponse(body)) return body;
 
@@ -38,32 +45,32 @@ export async function POST(request: Request) {
   }
 
   try {
-    const tier = viewerTierFromRequest(request);
+    const actor = `${viewer.name} (${viewer.id})`;
     const store = getProjectStore();
     const action = parsed.data.action;
 
     switch (action) {
       case "resolve_conflict":
-        await store.resolveConflict(tier, parsed.data.conflictId, parsed.data.choice, parsed.data.note);
+        await store.resolveConflict(viewer.tier, parsed.data.conflictId, parsed.data.choice, parsed.data.note, actor);
         break;
       case "submit_interview":
-        await store.submitInterview(tier, parsed.data.gapId, parsed.data.answers);
+        await store.submitInterview(viewer.tier, parsed.data.gapId, parsed.data.answers, actor);
         break;
       case "edit_claim":
-        await store.editClaim(tier, parsed.data.claimId, parsed.data.summary);
+        await store.editClaim(viewer.tier, parsed.data.claimId, parsed.data.summary, actor);
         break;
       case "lock_snapshot":
-        await store.lockSnapshot(tier);
+        await store.lockSnapshot(viewer.tier, actor);
         break;
       case "acknowledge_receipt":
-        await store.acknowledgeReceipt(tier);
+        await store.acknowledgeReceipt(viewer.tier, actor);
         break;
       case "reset_demo":
-        await store.resetDemo(tier);
+        await store.resetDemo(viewer.tier, actor);
         break;
     }
 
-    const state = await store.getViewerState(tier);
+    const state = await store.getViewerState(viewer.tier);
     return NextResponse.json({ ok: true, state: toPublicState(state) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown";

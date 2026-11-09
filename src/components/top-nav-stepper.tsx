@@ -18,14 +18,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { STAGES, useWorkspace } from "@/lib/workspace-context";
-import { VIEWER_ROLES } from "@/lib/types";
-import type { ViewerRole } from "@/lib/types";
+import { DEMO_USERS } from "@/lib/auth/demo-users";
+import type { DemoUserId } from "@/lib/auth/demo-users";
 
-const ROLE_OPTIONS: { role: ViewerRole; tag: string; label: string }[] = [
-  { role: "t1-contractor", tag: "T1", label: "Contractor" },
-  { role: "t2-engineer", tag: "T2", label: "Engineer" },
-  { role: "t3-maintainer", tag: "T3", label: "Maintainer" },
-];
+const SESSION_OPTIONS: { id: DemoUserId; tag: string; label: string }[] = (
+  Object.keys(DEMO_USERS) as DemoUserId[]
+).map((id) => ({
+  id,
+  tag: `T${DEMO_USERS[id].tier}`,
+  label: DEMO_USERS[id].role,
+}));
 
 const TRIGGER_BASE =
   "outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring";
@@ -58,33 +60,37 @@ function ThemeToggle() {
   );
 }
 
-function RoleSwitcher() {
-  const { role, setRole, state } = useWorkspace();
+function SessionSwitcher() {
+  const { viewer, switchIdentity, state } = useWorkspace();
   return (
     <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-1">
-      {ROLE_OPTIONS.map((opt) => {
-        const active = role === opt.role;
-        const meta = VIEWER_ROLES[opt.role];
+      {SESSION_OPTIONS.map((opt) => {
+        const active = viewer?.id === opt.id;
         return (
-          <Tooltip key={opt.role}>
+          <Tooltip key={opt.id}>
             <TooltipTrigger
               className={`inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors ${TRIGGER_BASE} ${
                 active
                   ? "bg-foreground text-background"
                   : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
               }`}
-              onClick={() => setRole(opt.role)}
+              onClick={() => switchIdentity(opt.id)}
               aria-pressed={active}
             >
               <span className="font-mono text-[11px] opacity-70">{opt.tag}</span>
               <span className="hidden lg:inline">{opt.label}</span>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-              {meta.label} · {meta.description}
+              Switch session to {DEMO_USERS[opt.id].name} — {DEMO_USERS[opt.id].role} ({opt.tag})
             </TooltipContent>
           </Tooltip>
         );
       })}
+      {viewer && (
+        <span className="ml-1 hidden text-[11px] text-muted-foreground xl:inline">
+          {viewer.name} · {viewer.role}
+        </span>
+      )}
       {state && state.stats.withheldSources + state.stats.withheldClaims > 0 && (
         <Badge variant="outline" className="ml-1 h-6 font-mono text-[11px] text-missing border-missing/30 bg-missing/10">
           {state.stats.withheldSources}+{state.stats.withheldClaims} hidden
@@ -216,7 +222,7 @@ export function TopNavStepper() {
 
         {/* Actions */}
         <div className="flex items-center gap-1.5 md:flex-1 md:justify-end">
-          <RoleSwitcher />
+          <SessionSwitcher />
           <ThemeToggle />
           <Tooltip>
             <TooltipTrigger

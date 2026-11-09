@@ -63,7 +63,7 @@ function NextActionRow({ item }: { item: NextActionItem }) {
 }
 
 export function StageHandover() {
-  const { state, lockSnapshot, acknowledgeReceipt, setStage, tier } = useWorkspace();
+  const { state, lockSnapshot, acknowledgeReceipt, setStage } = useWorkspace();
   const [busy, setBusy] = useState<"lock" | "receipt" | "export" | null>(null);
 
   const handover = state?.handover;
@@ -104,7 +104,7 @@ export function StageHandover() {
     setBusy("export");
     try {
       const res = await fetch("/api/handover/export", {
-        headers: { "x-viewer-tier": String(tier) },
+        credentials: "include",
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;

@@ -2,8 +2,10 @@
 
 /**
  * Chronicle — client workspace context.
- * Holds stage progress, viewer role (shadow preview), workspace state and every
- * interaction handler that talks to the API routes.
+ * Sources the signed-in viewer from GET /api/session (server-derived tier) and
+ * drives every API interaction with `credentials: "include"`. No client-side
+ * tier state exists: the viewer's tier is the single source of truth and is
+ * never sent to the server as a header/body field.
  */
 import {
   createContext,
@@ -15,8 +17,8 @@ import {
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
-import type { AccessTier, ViewerRole, WorkspaceState } from "@/lib/types";
-import { VIEWER_ROLES } from "@/lib/types";
+import type { WorkspaceState } from "@/lib/types";
+import type { Viewer } from "@/lib/auth/get-viewer";
 
 export interface InspectedSource {
   sourceId: string;
@@ -42,11 +44,13 @@ export const STAGES: StageMeta[] = [
 interface WorkspaceContextValue {
   state: WorkspaceState | null;
   loading: boolean;
+  authLoading: boolean;
+  viewer: Viewer | null;
+  login: (userId: string) => Promise<void>;
+  logout: () => Promise<void>;
+  switchIdentity: (userId: string) => Promise<void>;
   stage: StageId;
   setStage: (stage: StageId) => void;
-  role: ViewerRole;
-  setRole: (role: ViewerRole) => void;
-  tier: AccessTier;
   inspected: InspectedSource | null;
   openInspector: (sourceId: string, quotes?: string[]) => void;
   closeInspector: () => void;
@@ -77,33 +81,59 @@ function apiError(status: number): Error {
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<WorkspaceState | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [viewer, setViewer] = useState<Viewer | null>(null);
   const [stage, setStage] = useState<StageId>(1);
-  const [role, setRoleState] = useState<ViewerRole>("t3-maintainer");
   const [inspected, setInspected] = useState<InspectedSource | null>(null);
-
-  const tier = VIEWER_ROLES[role].tier;
-
-  const fetchState = useCallback(
-    async (tierValue: AccessTier): Promise<WorkspaceState> => {
-      const res = await fetch("/api/reconstruct", {
-        headers: { "x-viewer-tier": String(tierValue) },
-        cache: "no-store",
-      });
-      if (!res.ok) throw apiError(res.status);
-      const data = (await res.json()) as { state: WorkspaceState };
-      return data.state;
-    },
-    []
-  );
 
   useEffect(() => {
     let active = true;
-    fetchState(tier)
+    (async () => {
+      try {
+        const res = await fetch("/api/session", {
+          cache: "no-store",
+          credentials: "include",
+        });
+        const data = (await res.json()) as { user?: Viewer | null };
+        if (active) setViewer(data.user ?? null);
+      } catch {
+        if (active) setViewer(null);
+      } finally {
+        if (active) setAuthLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const fetchState = useCallback(async (): Promise<WorkspaceState> => {
+    const res = await fetch("/api/reconstruct", {
+      cache: "no-store",
+      credentials: "include",
+    });
+    if (!res.ok) {
+      if (res.status === 401) throw new Error("SESSION_REQUIRED");
+      throw apiError(res.status);
+    }
+    const data = (await res.json()) as { state: WorkspaceState };
+    return data.state;
+  }, []);
+
+  useEffect(() => {
+    if (authLoading || !viewer) return;
+    let active = true;
+    fetchState()
       .then((next) => {
         if (active) setState(next);
       })
-      .catch(() => {
-        if (active) toast.error("Could not load workspace state");
+      .catch((error) => {
+        if (!active) return;
+        if (error instanceof Error && error.message === "SESSION_REQUIRED") {
+          setViewer(null);
+          return;
+        }
+        toast.error("Could not load workspace state");
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -111,12 +141,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false;
     };
-  }, [fetchState, tier]);
+  }, [authLoading, viewer, fetchState]);
 
   const refresh = useCallback(async () => {
-    const next = await fetchState(tier);
+    const next = await fetchState();
     setState(next);
-  }, [fetchState, tier]);
+  }, [fetchState]);
 
   const applyResponse = useCallback(async (res: Response) => {
     if (!res.ok) throw apiError(res.status);
@@ -124,17 +154,33 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     if (data.state) setState(data.state);
   }, []);
 
-  const setRole = useCallback(
-    (nextRole: ViewerRole) => {
-      if (nextRole === role) return;
-      setRoleState(nextRole);
-      window.setTimeout(() => {
-        toast.success(`Role preview → ${VIEWER_ROLES[nextRole].label}`, {
-          description: "Restricted sources and claims are filtered in real time.",
-        });
-      }, 0);
+  const login = useCallback(async (userId: string) => {
+    const res = await fetch("/api/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId }),
+      credentials: "include",
+    });
+    if (!res.ok) throw apiError(res.status);
+    const data = (await res.json()) as { user: Viewer };
+    setViewer(data.user);
+  }, []);
+
+  const logout = useCallback(async () => {
+    await fetch("/api/session/logout", {
+      method: "POST",
+      credentials: "include",
+    });
+    setViewer(null);
+  }, []);
+
+  const switchIdentity = useCallback(
+    async (userId: string) => {
+      if (userId === viewer?.id) return;
+      await logout();
+      await login(userId);
     },
-    [role]
+    [logout, login, viewer]
   );
 
   const ingest = useCallback(
@@ -147,8 +193,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }) => {
       const res = await fetch("/api/ingest", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-viewer-tier": String(tier) },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
+        credentials: "include",
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
@@ -162,100 +209,110 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setState(data.state);
       return { redactionCount: data.scrub.redactionCount, matchedTypes: data.scrub.matchedTypes, sourceId: data.source.id };
     },
-    [tier]
+    []
   );
 
   const reconstruct = useCallback(async () => {
     const res = await fetch("/api/reconstruct", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-viewer-tier": String(tier) },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ withVerify: false }),
+      credentials: "include",
     });
     await applyResponse(res);
-  }, [applyResponse, tier]);
+  }, [applyResponse]);
 
   const verify = useCallback(async () => {
     const res = await fetch("/api/verify", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-viewer-tier": String(tier) },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
+      credentials: "include",
     });
     await applyResponse(res);
-  }, [applyResponse, tier]);
+  }, [applyResponse]);
 
   const resolveConflict = useCallback(
     async (conflictId: string, choice: "SOURCE_A" | "SOURCE_B" | "MANUAL_EDIT", note?: string) => {
       const res = await fetch("/api/handover", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-viewer-tier": String(tier) },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "resolve_conflict", conflictId, choice, note }),
+        credentials: "include",
       });
       await applyResponse(res);
     },
-    [applyResponse, tier]
+    [applyResponse]
   );
 
   const submitInterview = useCallback(
     async (gapId: string, answers: string[]) => {
       const res = await fetch("/api/handover", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-viewer-tier": String(tier) },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "submit_interview", gapId, answers }),
+        credentials: "include",
       });
       await applyResponse(res);
     },
-    [applyResponse, tier]
+    [applyResponse]
   );
 
   const editClaim = useCallback(
     async (claimId: string, summary: string) => {
       const res = await fetch("/api/handover", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-viewer-tier": String(tier) },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "edit_claim", claimId, summary }),
+        credentials: "include",
       });
       await applyResponse(res);
     },
-    [applyResponse, tier]
+    [applyResponse]
   );
 
   const lockSnapshot = useCallback(async () => {
     const res = await fetch("/api/handover", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-viewer-tier": String(tier) },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "lock_snapshot" }),
+      credentials: "include",
     });
     await applyResponse(res);
-  }, [applyResponse, tier]);
+  }, [applyResponse]);
 
   const acknowledgeReceipt = useCallback(async () => {
     const res = await fetch("/api/handover", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-viewer-tier": String(tier) },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "acknowledge_receipt" }),
+      credentials: "include",
     });
     await applyResponse(res);
-  }, [applyResponse, tier]);
+  }, [applyResponse]);
 
   const resetDemo = useCallback(async () => {
     const res = await fetch("/api/handover", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-viewer-tier": String(tier) },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "reset_demo" }),
+      credentials: "include",
     });
     await applyResponse(res);
     setStage(1);
-  }, [applyResponse, tier]);
+  }, [applyResponse]);
 
   const value = useMemo<WorkspaceContextValue>(
     () => ({
       state,
       loading,
+      authLoading,
+      viewer,
+      login,
+      logout,
+      switchIdentity,
       stage,
       setStage,
-      role,
-      setRole,
-      tier,
       inspected,
       openInspector: (sourceId, quotes) => setInspected({ sourceId, quotes: quotes ?? [] }),
       closeInspector: () => setInspected(null),
@@ -270,7 +327,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       acknowledgeReceipt,
       resetDemo,
     }),
-    [state, loading, stage, role, setRole, tier, inspected, refresh, ingest, reconstruct, verify, resolveConflict, submitInterview, editClaim, lockSnapshot, acknowledgeReceipt, resetDemo]
+    [state, loading, authLoading, viewer, login, logout, switchIdentity, stage, inspected, refresh, ingest, reconstruct, verify, resolveConflict, submitInterview, editClaim, lockSnapshot, acknowledgeReceipt, resetDemo]
   );
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
