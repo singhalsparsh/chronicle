@@ -44,10 +44,20 @@ export async function POST(request: Request) {
     return jsonError(400, "VALIDATION_FAILED", "Handover payload failed validation.", parsed.error.flatten());
   }
 
+  // E-5: snapshot lifecycle actions are maintainer-only. The lock, receipt, and
+  // demo reset are trust-critical for the handover, so any tier below T3 is
+  // rejected before the mutation runs.
+  const action = parsed.data.action;
+  if (
+    (action === "lock_snapshot" || action === "acknowledge_receipt" || action === "reset_demo") &&
+    viewer.tier < 3
+  ) {
+    return jsonError(403, "FORBIDDEN", "forbidden: action requires Tier 3 maintainer clearance");
+  }
+
   try {
     const actor = `${viewer.name} (${viewer.id})`;
     const store = getProjectStore();
-    const action = parsed.data.action;
 
     switch (action) {
       case "resolve_conflict":

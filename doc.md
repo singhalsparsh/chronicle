@@ -230,6 +230,7 @@ All checks run against the production build (`npm run build` → `npm run start`
 | Tampered cookie → rejected as unauthenticated | flipped signature bit | ✓ data routes 401; `GET /api/session` → `{ user: null }` |
 | Raw secrets grep across `/api/reconstruct` (seed + ingest) → zero matches | grep on wire JSON | ✓ no `sk-live`, `ghp_`, `postgresql://`, emails; redaction stats present |
 | Mutation tier guard: T1 resolving a T2 conflict → 403 | POST `resolve_conflict CT-001` as jordan | ✓ 403 `FORBIDDEN` |
+| T1 attempting to lock snapshot → 403 | POST `lock_snapshot` as jordan | ✓ 403 `FORBIDDEN` (`forbidden: action requires Tier 3 maintainer clearance`) |
 
 ---
 
