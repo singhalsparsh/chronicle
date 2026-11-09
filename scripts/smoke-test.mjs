@@ -60,4 +60,25 @@ ok(
   `got ${r.status} ${JSON.stringify(r.data)}`
 );
 
-console.log(`\nAll smoke checks passed (${pass}/3).`);
+// 4. Server-side lock guard: T3 cannot lock while conflicts are unresolved.
+const alexLogin = await req("POST", "/api/session", { body: { userId: "alex" } });
+ok("login alex -> 200 with Set-Cookie", alexLogin.status === 200 && Boolean(alexLogin.setCookie), `got ${alexLogin.status}`);
+const alexCookie = alexLogin.setCookie.split(";")[0];
+
+r = await req("POST", "/api/handover", { cookie: alexCookie, body: { action: "reset_demo" } });
+ok("T3 reset_demo -> 200", r.status === 200, `got ${r.status}`);
+
+r = await req("POST", "/api/handover", { cookie: alexCookie, body: { action: "lock_snapshot" } });
+ok(
+  "T3 lock_snapshot with unresolved conflicts -> 409 UNRESOLVED_CONFLICTS",
+  r.status === 409 && r.data?.error?.code === "UNRESOLVED_CONFLICTS",
+  `got ${r.status} ${JSON.stringify(r.data)}`
+);
+
+for (const id of ["CT-001", "CT-002"]) {
+  r = await req("POST", "/api/handover", { cookie: alexCookie, body: { action: "resolve_conflict", conflictId: id, choice: "SOURCE_A" } });
+}
+r = await req("POST", "/api/handover", { cookie: alexCookie, body: { action: "lock_snapshot" } });
+ok("T3 lock_snapshot after resolving all conflicts -> 200", r.status === 200 && r.data?.ok === true, `got ${r.status}`);
+
+console.log(`\nAll smoke checks passed (${pass} assertions).`);

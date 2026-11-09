@@ -88,6 +88,9 @@ export async function POST(request: Request) {
     if (message.startsWith("forbidden")) {
       return jsonError(403, "FORBIDDEN", message);
     }
+    if (message.includes("unresolved conflicts")) {
+      return jsonError(409, "UNRESOLVED_CONFLICTS", "Cannot lock snapshot while conflicts are unresolved.");
+    }
     if (message.includes("not found") || message.includes("locked")) {
       return jsonError(409, "HANDOVER_CONFLICT", message);
     }

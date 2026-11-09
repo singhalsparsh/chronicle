@@ -96,6 +96,9 @@ record("P2c secret tokens ABSENT from markdown export", leaked.length === 0, `le
 // Export only lists VERIFIED claims — run the full verify+lock path so the
 // secret-bearing claim is eligible, then assert the placeholder exists.
 await req("POST", "/api/reconstruct", { cookie: alex, body: { withVerify: true } });
+// Server-side lock guard requires all conflicts resolved first.
+await req("POST", "/api/handover", { cookie: alex, body: { action: "resolve_conflict", conflictId: "CT-001", choice: "SOURCE_A" } });
+await req("POST", "/api/handover", { cookie: alex, body: { action: "resolve_conflict", conflictId: "CT-002", choice: "SOURCE_A" } });
 await req("POST", "/api/handover", { cookie: alex, body: { action: "lock_snapshot" } });
 const lockedExp = await req("GET", "/api/handover/export", { cookie: alex });
 record(

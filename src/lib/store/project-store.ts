@@ -574,6 +574,12 @@ export class ProjectStore {
     const auditActor = actor ?? this.actorForTier(viewerTier);
     await this.mutate((state) => {
       if (state.handover.locked) return;
+      // Server-side guard matching the UI: a handover snapshot must not be
+      // published while conflicts are still unresolved (E-2 / hostile audit).
+      const unresolved = state.conflicts.filter((c) => c.resolution === "UNRESOLVED").length;
+      if (unresolved > 0) {
+        throw new Error(`unresolved conflicts: cannot lock snapshot (${unresolved} unresolved)`);
+      }
       state.handover.version = "v1.0";
       state.handover.locked = true;
       state.handover.lockedAt = new Date().toISOString();
