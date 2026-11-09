@@ -47,6 +47,7 @@ export const AuditActionSchema = z.enum([
   "SNAPSHOT_LOCKED",
   "RECEIPT_ACKNOWLEDGED",
   "DEMO_RESET",
+  "MUTATION_REJECTED",
 ]);
 
 /* ------------------------------------------------------------------ */

@@ -149,7 +149,8 @@ export type AuditAction =
   | "INTERVIEW_COMPLETED"
   | "SNAPSHOT_LOCKED"
   | "RECEIPT_ACKNOWLEDGED"
-  | "DEMO_RESET";
+  | "DEMO_RESET"
+  | "MUTATION_REJECTED";
 
 export interface AuditLogEntry {
   id: string;

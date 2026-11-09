@@ -17,7 +17,7 @@
 import { createHash } from "node:crypto";
 import { SourceArtifactSchema } from "@/lib/schemas/handover-zod";
 import { scrubSecrets } from "@/lib/security/secret-scrubber";
-import { filterClaimsByClearance, filterSourcesByClearance } from "@/lib/security/rbac-filter";
+import { computeClaimAccessTier, filterClaimsByClearance, filterSourcesByClearance } from "@/lib/security/rbac-filter";
 import { verifyClaims } from "@/lib/engine/citation-verifier";
 import { heuristicReconstruct, reconstructState, type GapDefinition, type ReconstructionResult } from "@/lib/engine/temporal-reconstructor";
 import { extractCandidateFacts } from "@/lib/engine/heuristic-extractor";
@@ -194,6 +194,13 @@ export class ProjectStore {
         `[chronicle] state write failed (${this.persistenceError}) — continuing with in-memory state.`
       );
     }
+  }
+
+  /** Records a tier-scoped mutation rejection (E-2) as its own saved mutation. */
+  private async logRejected(actor: string, detail: string): Promise<void> {
+    await this.mutate((state) => {
+      this.logRaw(state, "MUTATION_REJECTED", actor, detail);
+    });
   }
 
   private logRaw(state: PersistedState, action: AuditAction, actor: string, detail: string): void {
@@ -413,6 +420,25 @@ export class ProjectStore {
     actor?: string
   ): Promise<void> {
     const auditActor = actor ?? this.actorForTier(viewerTier);
+
+    // E-2: reject before mutating when the conflict involves a claim above the
+    // viewer's clearance. computeClaimAccessTier is the existing source of truth.
+    await this.ensureReady();
+    const conflict = this.state!.conflicts.find((c) => c.id === conflictId);
+    if (!conflict) throw new Error(`conflict not found: ${conflictId}`);
+    const losingClaimId = choice === "SOURCE_B" ? conflict.sourceA.claimId : conflict.sourceB.claimId;
+    const winningClaimId = choice === "SOURCE_B" ? conflict.sourceB.claimId : conflict.sourceA.claimId;
+    const losingClaim = this.state!.claims.find((c) => c.id === losingClaimId);
+    const winningClaim = this.state!.claims.find((c) => c.id === winningClaimId);
+    const targetTier = Math.max(
+      computeClaimAccessTier(winningClaim?.citations ?? []),
+      computeClaimAccessTier(losingClaim?.citations ?? [])
+    );
+    if (targetTier > viewerTier) {
+      await this.logRejected(auditActor, `resolve_conflict ${conflictId}: requires tier ${targetTier}`);
+      throw new Error(`forbidden: conflict ${conflictId} involves claims above viewer clearance`);
+    }
+
     await this.mutate((state) => {
       const conflict = state.conflicts.find((c) => c.id === conflictId);
       if (!conflict) throw new Error(`conflict not found: ${conflictId}`);
@@ -444,6 +470,23 @@ export class ProjectStore {
 
   async submitInterview(viewerTier: AccessTier, gapId: string, answers: string[], actor?: string): Promise<void> {
     const auditActor = actor ?? this.actorForTier(viewerTier);
+
+    // E-2: reject before mutating when the gap references sources above the
+    // viewer's clearance.
+    await this.ensureReady();
+    const gap = this.state!.gaps.find((g) => g.id === gapId);
+    if (gap) {
+      let maxTier: AccessTier = 1;
+      for (const sid of gap.sourceIds) {
+        const sourceTier = this.state!.sources.find((s) => s.id === sid)?.accessTier ?? 1;
+        if (sourceTier > maxTier) maxTier = sourceTier;
+      }
+      if (maxTier > viewerTier) {
+        await this.logRejected(auditActor, `submit_interview ${gapId}: requires tier ${maxTier}`);
+        throw new Error(`forbidden: gap ${gapId} references sources above viewer clearance`);
+      }
+    }
+
     await this.mutate((state) => {
       const gap = state.gaps.find((g) => g.id === gapId);
       if (!gap) throw new Error(`gap not found: ${gapId}`);
@@ -468,6 +511,17 @@ export class ProjectStore {
 
   async editClaim(viewerTier: AccessTier, claimId: string, summary: string, actor?: string): Promise<void> {
     const auditActor = actor ?? this.actorForTier(viewerTier);
+
+    // E-2: reject before mutating when the claim is above the viewer's clearance.
+    await this.ensureReady();
+    const targetClaim = this.state!.claims.find((c) => c.id === claimId);
+    if (!targetClaim) throw new Error(`claim not found: ${claimId}`);
+    const claimTier = computeClaimAccessTier(targetClaim.citations);
+    if (claimTier > viewerTier) {
+      await this.logRejected(auditActor, `edit_claim ${claimId}: requires tier ${claimTier}`);
+      throw new Error(`forbidden: claim ${claimId} is above viewer clearance`);
+    }
+
     await this.mutate((state) => {
       const claim = state.claims.find((c) => c.id === claimId);
       if (!claim) throw new Error(`claim not found: ${claimId}`);

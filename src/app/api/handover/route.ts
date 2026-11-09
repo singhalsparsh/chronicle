@@ -75,6 +75,9 @@ export async function POST(request: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown";
     console.error("[handover:post]", error);
+    if (message.startsWith("forbidden")) {
+      return jsonError(403, "FORBIDDEN", message);
+    }
     if (message.includes("not found") || message.includes("locked")) {
       return jsonError(409, "HANDOVER_CONFLICT", message);
     }

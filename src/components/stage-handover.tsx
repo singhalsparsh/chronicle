@@ -37,6 +37,7 @@ const ACTION_LABEL: Record<AuditAction, string> = {
   INTERVIEW_COMPLETED: "Interview completed",
   SNAPSHOT_LOCKED: "Snapshot locked",
   RECEIPT_ACKNOWLEDGED: "Receipt acknowledged",
+  MUTATION_REJECTED: "Mutation rejected",
   DEMO_RESET: "Demo reset",
 };
 
