@@ -32,6 +32,8 @@ export interface SourceMetadata {
   status?: string;
   labels?: string[];
   url?: string;
+  /** Scrub summary captured at write time; the stored rawContent is already scrubbed. */
+  redactions?: { count: number; types: string[] };
 }
 
 export interface SourceArtifact {

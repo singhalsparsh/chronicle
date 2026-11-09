@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useWorkspace } from "@/lib/workspace-context";
 import { TierBadge, TypeBadge, fmtDate } from "@/components/shared";
-import { scrubSecrets } from "@/lib/security/secret-scrubber";
 
 interface Segment {
   text: string;
@@ -97,9 +96,9 @@ export function CitationInspectorDrawer() {
 
   const scrubInfo = useMemo(() => {
     if (!source) return null;
-    const result = scrubSecrets(source.rawContent);
-    if (result.redactionCount === 0) return null;
-    return result;
+    const redactions = source.metadata?.redactions;
+    if (!redactions || redactions.count === 0) return null;
+    return { redactionCount: redactions.count, matchedTypes: redactions.types };
   }, [source]);
 
   return (

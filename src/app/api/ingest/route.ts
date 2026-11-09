@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { IngestRequestSchema } from "@/lib/schemas/handover-zod";
 import { getProjectStore } from "@/lib/store/project-store";
 import { isErrorResponse, jsonError, parseJsonBody, viewerTierFromRequest } from "@/lib/api/helpers";
+import { toPublicSource, toPublicState } from "@/lib/api/public-dto";
 import { enrichGithubPr, isGithubPrUrl } from "@/lib/engine/github-ingest";
 
 /**
@@ -63,10 +64,10 @@ export async function POST(request: Request) {
     const state = await store.getViewerState(viewerTierFromRequest(request));
     return NextResponse.json({
       ok: true,
-      source,
+      source: toPublicSource(source),
       scrub,
       github,
-      state,
+      state: toPublicState(state),
     });
   } catch (error) {
     console.error("[ingest]", error);

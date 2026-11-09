@@ -61,9 +61,17 @@ function normalizeSeed(): { project: ProjectMeta; gaps: GapDefinition[]; sources
       author: raw.author,
       createdAt: raw.createdAt,
       accessTier: raw.accessTier,
-      rawContent: raw.rawContent,
+      // E-1a: seeds are scrubbed on write too — the stored rawContent is the
+      // scrubbed text, never the original unscrubbed archive.
+      rawContent: scrubbed.sanitizedText,
       sanitizedContent: scrubbed.sanitizedText,
-      metadata: raw.metadata,
+      metadata:
+        scrubbed.redactionCount > 0
+          ? {
+              ...raw.metadata,
+              redactions: { count: scrubbed.redactionCount, types: scrubbed.matchedTypes },
+            }
+          : raw.metadata,
     });
     factsBySource[parsed.id] = raw.facts ?? [];
     return parsed;
@@ -260,7 +268,7 @@ export class ProjectStore {
         conflicts: visibleConflicts.length,
         unresolvedConflicts: visibleConflicts.filter((c) => c.resolution === "UNRESOLVED").length,
         openGaps: visibleGaps.filter((g) => g.status === "MISSING_EVIDENCE").length,
-        totalRedactions: state.sources.reduce((sum, s) => sum + scrubSecrets(s.rawContent).redactionCount, 0),
+        totalRedactions: state.sources.reduce((sum, s) => sum + (s.metadata?.redactions?.count ?? 0), 0),
         auditEntries: state.auditLog.length,
       },
     };
@@ -299,9 +307,15 @@ export class ProjectStore {
         author: input.author,
         createdAt: new Date().toISOString(),
         accessTier: input.accessTier ?? 2,
-        rawContent: input.rawText,
+        // E-1a: only the scrubbed text is ever persisted as rawContent.
+        rawContent: scrub.sanitizedText,
         sanitizedContent: scrub.sanitizedText,
-        metadata: input.url ? { url: input.url } : undefined,
+        metadata: {
+          ...(input.url ? { url: input.url } : {}),
+          ...(scrub.redactionCount > 0
+            ? { redactions: { count: scrub.redactionCount, types: scrub.matchedTypes } }
+            : {}),
+        },
       });
       state.sources.push(created);
       // Deterministic candidate extraction: custom sources always yield usable

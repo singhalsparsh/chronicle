@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { ReconstructRequestSchema } from "@/lib/schemas/handover-zod";
 import { getProjectStore } from "@/lib/store/project-store";
 import { isErrorResponse, jsonError, parseJsonBody, viewerTierFromRequest } from "@/lib/api/helpers";
+import { toPublicState } from "@/lib/api/public-dto";
 
 /**
  * GET /api/reconstruct — returns the current role-filtered workspace state.
@@ -11,7 +12,7 @@ export async function GET(request: Request) {
   try {
     const store = getProjectStore();
     const state = await store.getViewerState(viewerTierFromRequest(request));
-    return NextResponse.json({ ok: true, state });
+    return NextResponse.json({ ok: true, state: toPublicState(state) });
   } catch (error) {
     console.error("[reconstruct:get]", error);
     return jsonError(500, "STATE_UNAVAILABLE", "Could not load workspace state.");

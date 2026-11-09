@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { VerifyRequestSchema } from "@/lib/schemas/handover-zod";
 import { getProjectStore } from "@/lib/store/project-store";
 import { isErrorResponse, jsonError, parseJsonBody, viewerTierFromRequest } from "@/lib/api/helpers";
+import { toPublicState } from "@/lib/api/public-dto";
 
 /**
  * POST /api/verify
@@ -22,7 +23,7 @@ export async function POST(request: Request) {
     const store = getProjectStore();
     const outcome = await store.verify(tier, parsed.data.claimIds);
     const state = await store.getViewerState(tier);
-    return NextResponse.json({ ok: true, outcome, state });
+    return NextResponse.json({ ok: true, outcome, state: toPublicState(state) });
   } catch (error) {
     console.error("[verify]", error);
     return jsonError(500, "VERIFY_FAILED", "Verification failed.");

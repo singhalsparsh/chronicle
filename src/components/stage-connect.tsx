@@ -19,7 +19,6 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useWorkspace } from "@/lib/workspace-context";
 import { SourceTypeIcon, TierBadge, fmtDate } from "@/components/shared";
-import { scrubSecrets } from "@/lib/security/secret-scrubber";
 import type { SourceType } from "@/lib/types";
 
 const TYPE_FILTERS: { value: SourceType | "ALL"; label: string }[] = [
@@ -35,7 +34,7 @@ function SourceRow({ sourceId, onOpen }: { sourceId: string; onOpen: (id: string
   const source = state?.sources.find((s) => s.id === sourceId);
   const redactions = useMemo(() => {
     if (!source) return 0;
-    return scrubSecrets(source.rawContent).redactionCount;
+    return source.metadata?.redactions?.count ?? 0;
   }, [source]);
 
   if (!source) return null;
@@ -96,7 +95,7 @@ export function StageConnect() {
         s.id.toLowerCase().includes(q) ||
         s.title.toLowerCase().includes(q) ||
         s.author.toLowerCase().includes(q) ||
-        s.rawContent.toLowerCase().includes(q);
+        s.sanitizedContent.toLowerCase().includes(q);
       return matchesType && matchesQuery;
     });
   }, [sources, query, typeFilter]);

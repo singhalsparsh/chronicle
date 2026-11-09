@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { HandoverRequestSchema } from "@/lib/schemas/handover-zod";
 import { getProjectStore } from "@/lib/store/project-store";
 import { isErrorResponse, jsonError, parseJsonBody, viewerTierFromRequest } from "@/lib/api/helpers";
+import { toPublicState } from "@/lib/api/public-dto";
 
 /**
  * GET /api/handover — returns the role-filtered handover bundle.
@@ -63,7 +64,7 @@ export async function POST(request: Request) {
     }
 
     const state = await store.getViewerState(tier);
-    return NextResponse.json({ ok: true, state });
+    return NextResponse.json({ ok: true, state: toPublicState(state) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown";
     console.error("[handover:post]", error);

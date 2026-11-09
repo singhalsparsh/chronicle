@@ -58,6 +58,12 @@ export const SourceMetadataSchema = z
     status: z.string().optional(),
     labels: z.array(z.string()).optional(),
     url: z.string().url().optional(),
+    redactions: z
+      .object({
+        count: z.number().int().nonnegative(),
+        types: z.array(z.string()),
+      })
+      .optional(),
   })
   .optional();
 
