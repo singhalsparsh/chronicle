@@ -292,15 +292,29 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [applyResponse]);
 
   const resetDemo = useCallback(async () => {
-    const res = await fetch("/api/handover", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "reset_demo" }),
-      credentials: "include",
-    });
-    await applyResponse(res);
+    let res: Response;
+    try {
+      res = await fetch("/api/handover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reset_demo" }),
+        credentials: "include",
+      });
+    } catch {
+      toast.error("Reset failed.");
+      return;
+    }
+    if (!res.ok) {
+      if (res.status === 403) {
+        toast.error("Action restricted to T3 Maintainer.");
+        return;
+      }
+      throw apiError(res.status);
+    }
+    const data = (await res.json()) as { state?: WorkspaceState };
+    if (data.state) setState(data.state);
     setStage(1);
-  }, [applyResponse]);
+  }, []);
 
   const value = useMemo<WorkspaceContextValue>(
     () => ({

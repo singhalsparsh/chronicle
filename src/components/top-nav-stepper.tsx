@@ -101,7 +101,8 @@ function SessionSwitcher() {
 }
 
 export function TopNavStepper() {
-  const { state, stage, setStage, resetDemo } = useWorkspace();
+  const { state, stage, setStage, resetDemo, viewer } = useWorkspace();
+  const isMaintainer = viewer?.tier === 3;
   const [confirmReset, setConfirmReset] = useState(false);
 
   return (
@@ -226,13 +227,22 @@ export function TopNavStepper() {
           <ThemeToggle />
           <Tooltip>
             <TooltipTrigger
-              className={`grid size-9 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground ${TRIGGER_BASE}`}
-              onClick={() => setConfirmReset(true)}
-              aria-label="Reset demo"
+              className={`grid size-9 place-items-center rounded-md transition-colors ${TRIGGER_BASE} ${
+                isMaintainer
+                  ? "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  : "cursor-not-allowed text-muted-foreground/40"
+              }`}
+              onClick={() => {
+                if (isMaintainer) setConfirmReset(true);
+              }}
+              aria-label={isMaintainer ? "Reset demo" : "Reset demo (Maintainers only)"}
+              aria-disabled={!isMaintainer}
             >
               <RotateCcw className="size-4" />
             </TooltipTrigger>
-            <TooltipContent>Reset demo workspace</TooltipContent>
+            <TooltipContent>
+              {isMaintainer ? "Reset demo workspace" : "Only Maintainers can reset the demo."}
+            </TooltipContent>
           </Tooltip>
         </div>
       </div>
