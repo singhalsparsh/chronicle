@@ -377,8 +377,32 @@ export class ProjectStore {
 
       if (viewerTier === 3) {
         // Maintainer view is authoritative and is persisted as the global baseline.
-        state.claims = result.claims;
-        state.conflicts = result.conflicts;
+        // Preserve already-resolved conflicts: the engine regenerates conflicts
+        // fresh (UNRESOLVED), so merge previous resolution state by id.
+        const prevConflictById = new Map(state.conflicts.map((c) => [c.id, c]));
+        const preservedConflicts = result.conflicts.map((c) => {
+          const prev = prevConflictById.get(c.id);
+          if (prev && prev.resolution !== "UNRESOLVED") {
+            return {
+              ...c,
+              resolution: prev.resolution,
+              manualNote: prev.manualNote,
+              resolvedAt: prev.resolvedAt,
+            };
+          }
+          return c;
+        });
+        // Keep superseded (losing) claims demoted across reconstructs.
+        const prevClaimById = new Map(state.claims.map((cl) => [cl.id, cl]));
+        const preservedClaims = result.claims.map((cl) => {
+          const prev = prevClaimById.get(cl.id);
+          if (prev?.superseded) {
+            return { ...cl, superseded: true, status: prev.status };
+          }
+          return cl;
+        });
+        state.claims = preservedClaims;
+        state.conflicts = preservedConflicts;
         state.gaps = result.gaps;
         state.nextActions = result.nextActions;
         state.whoToAsk = result.whoToAsk;
