@@ -64,13 +64,13 @@ export function buildHandoverMarkdown(state: WorkspaceState, viewerLabel: string
     for (const [category, claims] of forCategory) {
       lines.push(`### ${CATEGORY_LABEL[category]}`);
       lines.push("");
-      lines.push("| Claim | Status | Sources | Authored |");
-      lines.push("| --- | --- | --- | --- |");
       for (const claim of claims) {
-        const sources = claim.citations.map((c) => c.sourceId).join(", ");
-        lines.push(`| ${esc(claim.title)} | ${claim.status} | ${esc(sources)} | ${esc(claim.author)} |`);
+        lines.push(`- **${esc(claim.title)}** — ${claim.status} · authored by ${esc(claim.author)}`);
+        for (const citation of claim.citations) {
+          lines.push(`  - [${esc(citation.sourceId)}] "${esc(citation.verbatimQuote)}"`);
+        }
+        lines.push("");
       }
-      lines.push("");
     }
   }
 
