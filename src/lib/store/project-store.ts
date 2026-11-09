@@ -1,15 +1,27 @@
 /**
  * Chronicle — Hybrid persistence layer.
  *
- * Uses Supabase (PostgREST) when NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY
- * are configured; otherwise falls back to a pre-seeded stateful in-memory store so
- * the deployed demo works with zero configuration friction.
+ * Uses Supabase relational persistence (per-entity tables + RLS) when
+ * NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY are configured; otherwise
+ * falls back to a pre-seeded stateful in-memory store so the deployed demo works
+ * with zero configuration friction.
+ *
+ * Security notes (audit remediation):
+ *  - Clearance filtering happens BEFORE any source text reaches an LLM prompt.
+ *  - Conflict resolution is transactional: the losing claim is demoted in the
+ *    same mutation that records the resolution.
+ *  - Integrity digests are SHA-256 over a canonical projection.
+ *  - Custom sources get candidate facts via a deterministic extractor, so
+ *    ingestion never silently yields "no facts" when the LLM path is off.
  */
-import { SourceArtifactSchema, PersistedStateSchema } from "@/lib/schemas/handover-zod";
+import { createHash } from "node:crypto";
+import { SourceArtifactSchema } from "@/lib/schemas/handover-zod";
 import { scrubSecrets } from "@/lib/security/secret-scrubber";
 import { filterClaimsByClearance, filterSourcesByClearance } from "@/lib/security/rbac-filter";
 import { verifyClaims } from "@/lib/engine/citation-verifier";
 import { heuristicReconstruct, reconstructState, type GapDefinition, type ReconstructionResult } from "@/lib/engine/temporal-reconstructor";
+import { extractCandidateFacts } from "@/lib/engine/heuristic-extractor";
+import { SupabaseRelationalPersistence } from "@/lib/store/supabase-persistence";
 import type {
   AccessTier,
   AuditAction,
@@ -60,14 +72,14 @@ function normalizeSeed(): { project: ProjectMeta; gaps: GapDefinition[]; sources
 }
 
 /* ------------------------------------------------------------------ */
-/* Persistence                                                          */
+/* Persistence interface                                                */
 /* ------------------------------------------------------------------ */
 
 interface Persistence {
   readonly mode: "memory" | "supabase";
   init(): Promise<void>;
-  loadSnapshot(): Promise<PersistedState | null>;
-  saveSnapshot(state: PersistedState): Promise<void>;
+  loadState(): Promise<PersistedState | null>;
+  saveState(state: PersistedState): Promise<void>;
 }
 
 class MemoryPersistence implements Persistence {
@@ -78,89 +90,38 @@ class MemoryPersistence implements Persistence {
     // nothing to do
   }
 
-  async loadSnapshot(): Promise<PersistedState | null> {
+  async loadState(): Promise<PersistedState | null> {
     return this.snapshot;
   }
 
-  async saveSnapshot(state: PersistedState): Promise<void> {
+  async saveState(state: PersistedState): Promise<void> {
     this.snapshot = state;
   }
 }
 
-class SupabasePersistence implements Persistence {
-  readonly mode = "supabase" as const;
-  private readonly baseUrl: string;
-  private readonly apiKey: string;
-  private readonly table = "chronicle_state";
-
-  constructor(supabaseUrl: string, serviceRoleKey: string) {
-    this.baseUrl = supabaseUrl.replace(/\/$/, "") + "/rest/v1";
-    this.apiKey = serviceRoleKey;
-  }
-
-  private headers(prefer?: string): Record<string, string> {
-    const headers: Record<string, string> = {
-      apikey: this.apiKey,
-      Authorization: `Bearer ${this.apiKey}`,
-      "Content-Type": "application/json",
-    };
-    if (prefer) headers.Prefer = prefer;
-    return headers;
-  }
-
-  async init(): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/${this.table}?select=id&limit=1`, {
-      headers: this.headers(),
-    });
-    if (!res.ok && res.status !== 404) {
-      throw new Error(`Supabase init failed (${res.status})`);
-    }
-  }
-
-  async loadSnapshot(): Promise<PersistedState | null> {
-    const res = await fetch(`${this.baseUrl}/${this.table}?select=state&limit=1`, {
-      headers: this.headers(),
-    });
-    if (!res.ok) return null;
-    const rows = (await res.json()) as Array<{ state?: unknown }>;
-    const row = rows[0];
-    if (!row?.state) return null;
-    const parsed = PersistedStateSchema.safeParse(row.state);
-    return parsed.success ? parsed.data : null;
-  }
-
-  async saveSnapshot(state: PersistedState): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/${this.table}`, {
-      method: "POST",
-      headers: this.headers("resolution=merge-duplicates"),
-      body: JSON.stringify({ id: "main", state, updated_at: new Date().toISOString() }),
-    });
-    if (!res.ok) {
-      throw new Error(`Supabase save failed (${res.status})`);
-    }
-  }
-}
-
 /* ------------------------------------------------------------------ */
-/* Digest                                                               */
+/* Digest (SHA-256)                                                     */
 /* ------------------------------------------------------------------ */
 
-function djb2(input: string): string {
-  let hash = 5381;
-  for (let i = 0; i < input.length; i += 1) {
-    hash = ((hash << 5) + hash + input.charCodeAt(i)) >>> 0;
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((v) => stableStringify(v)).join(",")}]`;
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`).join(",")}}`;
   }
-  return hash.toString(16).padStart(8, "0");
+  return JSON.stringify(value);
 }
 
 function computeDigest(state: PersistedState): string {
-  const canonical = JSON.stringify({
-    claims: state.claims.map((c) => [c.id, c.status, c.summary]),
+  const canonical = stableStringify({
+    claims: state.claims.map((c) => [c.id, c.status, c.summary, c.superseded ?? false]),
     conflicts: state.conflicts.map((c) => [c.id, c.resolution, c.manualNote ?? ""]),
     gaps: state.gaps.map((g) => [g.id, g.status, g.answers]),
     handover: state.handover,
   });
-  return djb2(canonical);
+  return createHash("sha256").update(canonical).digest("hex");
 }
 
 /* ------------------------------------------------------------------ */
@@ -188,14 +149,14 @@ export class ProjectStore {
       `[chronicle] persistence init: supabaseUrl=${Boolean(supabaseUrl)} serviceKey=${Boolean(serviceKey)}`
     );
     if (supabaseUrl && serviceKey) {
-      const candidate = new SupabasePersistence(supabaseUrl, serviceKey);
+      const candidate = new SupabaseRelationalPersistence(supabaseUrl, serviceKey);
       try {
         await candidate.init();
-        const snapshot = await candidate.loadSnapshot();
+        const loaded = await candidate.loadState();
         this.persistence = candidate;
-        this.state = snapshot ?? buildSeedState();
+        this.state = loaded ?? buildSeedState();
         this.seq = this.state.sources.length + this.state.auditLog.length;
-        if (!snapshot) await this.persistence.saveSnapshot(this.state);
+        if (!loaded) await this.persistence.saveState(this.state);
         this.persistenceError = null;
         return;
       } catch (error) {
@@ -208,7 +169,7 @@ export class ProjectStore {
 
     this.persistence = new MemoryPersistence();
     this.state = buildSeedState();
-    await this.persistence.saveSnapshot(this.state);
+    await this.persistence.saveState(this.state);
   }
 
   private async mutate(fn: (state: PersistedState) => Promise<void> | void): Promise<void> {
@@ -217,14 +178,12 @@ export class ProjectStore {
     await fn(this.state);
     this.state.handover.digest = computeDigest(this.state);
     try {
-      await this.persistence.saveSnapshot(this.state);
+      await this.persistence.saveState(this.state);
       this.persistenceError = null;
     } catch (error) {
-      // Persistence is best-effort: a transient Supabase failure must never
-      // break the demo. The local state remains authoritative for this session.
       this.persistenceError = error instanceof Error ? error.message : String(error);
       console.warn(
-        `[chronicle] snapshot write failed (${this.persistenceError}) — continuing with in-memory state.`
+        `[chronicle] state write failed (${this.persistenceError}) — continuing with in-memory state.`
       );
     }
   }
@@ -345,7 +304,9 @@ export class ProjectStore {
         metadata: input.url ? { url: input.url } : undefined,
       });
       state.sources.push(created);
-      state.factsBySource[id] = [];
+      // Deterministic candidate extraction: custom sources always yield usable
+      // candidate facts even when the LLM reconstruction path is unavailable.
+      state.factsBySource[id] = extractCandidateFacts(created);
       this.logRaw(state, "SOURCE_INGESTED", this.actorForTier(3), `${id} · ${input.title} (${input.sourceType})`);
       if (scrub.redactionCount > 0) {
         this.logRaw(
@@ -362,30 +323,42 @@ export class ProjectStore {
 
   async reconstruct(viewerTier: AccessTier): Promise<void> {
     await this.mutate(async (state) => {
+      const { visibleSources } = filterSourcesByClearance(state.sources, viewerTier);
+      const visibleIds = new Set(visibleSources.map((s) => s.id));
+      const visibleFacts: Record<string, SourceFact[]> = {};
+      for (const source of visibleSources) {
+        visibleFacts[source.id] = state.factsBySource[source.id] ?? [];
+      }
+      const visibleGapDefs = (seedJson.gaps as GapDefinition[]).filter(
+        (g) => g.sourceIds.some((sid) => visibleIds.has(sid))
+      );
+
       const previous: ReconstructionResult = {
-        claims: state.claims,
+        claims: state.claims.filter((c) => c.accessTier <= viewerTier),
         conflicts: state.conflicts,
         gaps: state.gaps,
         nextActions: state.nextActions,
         whoToAsk: state.whoToAsk,
       };
-      const result = await reconstructState(
-        state.sources,
-        state.factsBySource,
-        seedJson.gaps as GapDefinition[],
-        previous
-      );
-      state.claims = result.claims;
-      state.conflicts = result.conflicts;
-      state.gaps = result.gaps;
-      state.nextActions = result.nextActions;
-      state.whoToAsk = result.whoToAsk;
-      state.project = { ...state.project, lastReconstructedAt: new Date().toISOString() };
+      // B: clearance filtering happens BEFORE the LLM prompt is constructed —
+      // only sources the viewer may see ever leave this function.
+      const result = await reconstructState(visibleSources, visibleFacts, visibleGapDefs, previous);
+
+      if (viewerTier === 3) {
+        // Maintainer view is authoritative and is persisted as the global baseline.
+        state.claims = result.claims;
+        state.conflicts = result.conflicts;
+        state.gaps = result.gaps;
+        state.nextActions = result.nextActions;
+        state.whoToAsk = result.whoToAsk;
+        state.project = { ...state.project, lastReconstructedAt: new Date().toISOString() };
+      }
+
       this.logRaw(
         state,
         "RECONSTRUCT_COMPLETED",
         this.actorForTier(viewerTier),
-        `${state.claims.length} claims · ${state.conflicts.length} conflicts · ${state.gaps.length} gaps`
+        `tier=${viewerTier} · ${result.claims.length} claims · ${result.conflicts.length} conflicts · ${result.gaps.length} gaps (heuristic/LLM on visible sources)`
       );
     });
   }
@@ -417,6 +390,20 @@ export class ProjectStore {
     await this.mutate((state) => {
       const conflict = state.conflicts.find((c) => c.id === conflictId);
       if (!conflict) throw new Error(`conflict not found: ${conflictId}`);
+
+      // D: transactional resolution — demote the losing claim in the same
+      // mutation that records the resolution, so verified contradictions can
+      // never survive a resolution.
+      const losingClaimId = choice === "SOURCE_B" ? conflict.sourceA.claimId : conflict.sourceB.claimId;
+      const winningClaimId = choice === "SOURCE_B" ? conflict.sourceB.claimId : conflict.sourceA.claimId;
+      const losing = state.claims.find((c) => c.id === losingClaimId);
+      const winning = state.claims.find((c) => c.id === winningClaimId);
+      if (losing) {
+        losing.superseded = true;
+        if (losing.status !== "HUMAN_APPROVED") losing.status = "MISSING_EVIDENCE";
+      }
+      if (winning && winning.status === "EVIDENCE_GATHERED") winning.status = "VERIFIED";
+
       conflict.resolution = choice;
       conflict.manualNote = note;
       conflict.resolvedAt = new Date().toISOString();
@@ -424,7 +411,7 @@ export class ProjectStore {
         state,
         "CONFLICT_RESOLVED",
         this.actorForTier(viewerTier),
-        `${conflictId} · ${conflict.subject} → ${choice}${note ? ` · ${note}` : ""}`
+        `${conflictId} · ${conflict.subject} → ${choice} · ${losingClaimId} superseded${note ? ` · ${note}` : ""}`
       );
     });
   }
@@ -457,7 +444,7 @@ export class ProjectStore {
       const claim = state.claims.find((c) => c.id === claimId);
       if (!claim) throw new Error(`claim not found: ${claimId}`);
       claim.summary = summary;
-      if (claim.status === "MISSING_EVIDENCE") {
+      if (claim.status === "MISSING_EVIDENCE" && !claim.superseded) {
         claim.status = "HUMAN_APPROVED";
       }
       this.logRaw(
@@ -499,7 +486,7 @@ export class ProjectStore {
     });
     const fresh = buildSeedState();
     this.state = fresh;
-    await this.persistence.saveSnapshot(fresh);
+    await this.persistence.saveState(fresh);
   }
 }
 
@@ -512,7 +499,7 @@ function buildSeedState(): PersistedState {
       ts: new Date().toISOString(),
       actor: "System",
       action: "APP_LOADED",
-      detail: "28-artifact synthetic workspace loaded (Core-Payments-Service)",
+      detail: "8-artifact synthetic workspace loaded (Core-Payments-Service)",
     },
   ];
   return {

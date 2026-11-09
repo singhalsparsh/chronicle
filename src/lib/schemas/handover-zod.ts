@@ -70,6 +70,7 @@ export const SourceFactSchema = z.object({
   stance: z.string().optional(),
   gapId: z.string().optional(),
   suggests: z.string().optional(),
+  candidate: z.boolean().optional(),
 });
 
 export const SourceArtifactSchema = z.object({
@@ -108,6 +109,7 @@ export const ClaimSchema = z.object({
   conflictGroup: z.string().optional(),
   stance: z.string().optional(),
   gapId: z.string().optional(),
+  superseded: z.boolean().optional(),
 });
 
 export const ConflictSideSchema = z.object({

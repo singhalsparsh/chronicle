@@ -34,7 +34,7 @@ There is **no login wall** â€” judges land directly in the interactive work
 | Mode | When | Notes |
 | --- | --- | --- |
 | In-memory (default) | `NEXT_PUBLIC_SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` not set | Pre-seeded stateful singleton; zero configuration. This is what the live Vercel demo uses. |
-| Supabase | Both env vars set | Persists the same state snapshot to a `chronicle_state` table via PostgREST. Falls back to memory on any error. |
+| Supabase | Both env vars set | Relational persistence: each entity (sources, claims, conflicts, gaps, next_actions, who_to_ask, handover, audit_log) lives in its own table, with optimistic concurrency via `state_meta`. Requires migrations 001 + 002. Falls back to memory on any error. |
 
 ### Environment variables (all optional — demo runs without any)
 
@@ -67,9 +67,11 @@ src/
     security/rbac-filter.ts        # filterSourcesByClearance / computeClaimAccessTier / filterClaimsByClearance
     engine/citation-verifier.ts    # verifyClaimCitations / verifyClaims / preflightCitations
     engine/temporal-reconstructor.ts  # heuristicReconstruct + guarded LLM path + deriveWhoToAsk
-    engine/handover-export.ts      # Markdown renderer for the locked snapshot packet
+    engine/heuristic-extractor.ts  # deterministic candidate-fact extraction for custom sources
+    engine/handover-export.ts      # Markdown renderer for the locked snapshot packet (+ exit interviews)
     engine/github-ingest.ts        # real GitHub PR fetch (title/body) with graceful fallback
     store/project-store.ts         # ProjectStore singleton: seed, persistence, mutations, viewer filtering
+    store/supabase-persistence.ts  # relational Supabase persistence (per-entity + state_meta CAS)
     api/helpers.ts                 # tier header parsing, JSON error envelope, body parsing
     workspace-context.tsx          # client state hub (stage, role, inspector, API actions)
   types/speech.d.ts                # minimal Web Speech API typings (window.SpeechRecognition)

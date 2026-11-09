@@ -74,6 +74,30 @@ export function buildHandoverMarkdown(state: WorkspaceState, viewerLabel: string
     }
   }
 
+  lines.push("## 2.5 Exit interviews (missing-evidence flags)");
+  lines.push("");
+  const interviews = state.gaps;
+  if (interviews.length === 0) {
+    lines.push("_No exit interviews on file for this role._");
+  } else {
+    for (const gap of interviews) {
+      lines.push(`### ${gap.title}`);
+      lines.push("");
+      lines.push(`- Status: ${gap.status}`);
+      lines.push(`- Sources: ${gap.sourceIds.join(", ")}`);
+      if (gap.approvedAt) lines.push(`- Approved at: ${iso(gap.approvedAt)}`);
+      lines.push("");
+      gap.questions.forEach((question, i) => {
+        const answer = gap.answers[i]?.trim();
+        lines.push(`**Q${i + 1}.** ${question}`);
+        lines.push("");
+        lines.push(answer ? `> ${answer}` : "> _(no answer recorded)_");
+        lines.push("");
+      });
+    }
+  }
+  lines.push("");
+
   lines.push("## 3. First 7 days — next actions");
   lines.push("");
   if (state.nextActions.length === 0) {

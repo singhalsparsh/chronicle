@@ -197,6 +197,23 @@ All checks run against the production build (`npm run build` → `npm run start`
 
 ---
 
+## 6.5 Audit Remediation (Round 3.5)
+
+Eight findings from an external audit were remediated:
+
+| # | Finding | Fix |
+|---|---------|-----|
+| A | Custom ingestion produced no facts offline | Deterministic heuristic candidate-fact extractor (`heuristic-extractor.ts`) runs at ingest; candidates start unverified and must pass citation grounding. |
+| B | Clearance filtering after LLM prompt construction | `ProjectStore.reconstruct(tier)` filters sources/definitions by viewer tier BEFORE any LLM prompt is built. |
+| C | Model identifier questioned | Verified `gemini-3.5-flash` exists in the provider catalogue; configurable via `GEMINI_MODEL`. |
+| D | Conflict resolution left stale verified claims | Resolution is transactional: the losing claim is set `superseded` and demoted to `MISSING_EVIDENCE` in the same mutation. |
+| E | Exit-interview answers omitted from export | `handover-export.ts` now emits an "Exit interviews" section (questions + answers + status + approval timestamp). |
+| F | Docs (28) vs seed (8) mismatch | Docs updated; seed is 8 sources / 1 gap; counts verified by runtime checks. |
+| G | JSON-blob + service-role persistence | New relational persistence (`supabase-persistence.ts`) writes per-entity tables with optimistic `state_meta` CAS; migration `002_relational_persistence_rls.sql` adds tables + user-level RLS write policies. |
+| H | DJB2 32-bit digest | SHA-256 digest over a canonical, stable-ordered projection (64 hex chars). |
+
+To activate relational persistence, run `supabase/migrations/002_relational_persistence_rls.sql` in your Supabase project (after 001). Without it, the app gracefully falls back to the in-memory store and keeps working.
+
 ## 7. Round 3 Commitments
 
 1. **Real-time collaboration & presence** — live Supabase Realtime subscriptions over

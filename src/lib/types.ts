@@ -56,6 +56,8 @@ export interface SourceFact {
   stance?: string;
   gapId?: string;
   suggests?: string;
+  /** True when the fact was extracted heuristically from raw text, not authored in the seed. */
+  candidate?: boolean;
 }
 
 export type EvidenceCategory =
@@ -94,6 +96,8 @@ export interface Claim {
   conflictGroup?: string;
   stance?: string;
   gapId?: string;
+  /** True when this claim was superseded by a resolved conflict (kept for history). */
+  superseded?: boolean;
 }
 
 export type ConflictResolution = "UNRESOLVED" | "SOURCE_A" | "SOURCE_B" | "MANUAL_EDIT";
