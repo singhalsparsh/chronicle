@@ -94,6 +94,11 @@ grounding, regex secret scrubbing, RBAC tier filtering, and a hybrid persistence
 from the signed session cookie → UI. Every mutation (ingest, reconstruct, verify, resolve, interview,
 lock, receipt) writes through `ProjectStore` and returns the fresh filtered state to the client.
 
+> The deployed demo runs strictly on the default in-memory pre-seeded store for instant, zero-config
+> judging. The Supabase relational adapter, schema, and RLS policies are fully implemented in the
+> repository and can be activated via environment variables, but they are intentionally disabled in
+> the live demo to prevent network latency.
+
 ---
 
 ## 4. Components & Details
@@ -147,7 +152,8 @@ Slack thread (`SLK-240`) for role-filter demos.
 - **Citation verifier** (`citation-verifier.ts`): source existence + normalized-substring check;
   auto-downgrade to `MISSING_EVIDENCE` unless `HUMAN_APPROVED`.
 - **Supabase RLS** (`supabase/migrations/001_init_schema.sql`): per-table policies tier-gated by a
-  `viewer_tier` JWT claim, service-role writes, indexes on filtered columns.
+  `viewer_tier` JWT claim, service-role writes, indexes on filtered columns. Disabled by default;
+  activate with `USE_SUPABASE=true` plus credentials — not part of the live demo.
 
 ### 4.6 Feature checklist
 - [x] One-click demo-identity entry (Alex T3 / Sam T2 / Jordan T1); workspace pre-loaded with 8 artifacts

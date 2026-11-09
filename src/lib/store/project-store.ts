@@ -151,12 +151,17 @@ export class ProjectStore {
   }
 
   private async init(): Promise<void> {
+    // The hackathon demo runs strictly on the in-memory store. The Supabase
+    // adapter is fully implemented but intentionally disabled: it only
+    // activates when USE_SUPABASE=true AND both credentials are present, so no
+    // network calls are ever attempted in the default demo.
+    const useSupabase = process.env.USE_SUPABASE === "true";
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     console.info(
-      `[chronicle] persistence init: supabaseUrl=${Boolean(supabaseUrl)} serviceKey=${Boolean(serviceKey)}`
+      `[chronicle] persistence init: useSupabase=${useSupabase} supabaseUrl=${Boolean(supabaseUrl)} serviceKey=${Boolean(serviceKey)}`
     );
-    if (supabaseUrl && serviceKey) {
+    if (useSupabase && supabaseUrl && serviceKey) {
       const candidate = new SupabaseRelationalPersistence(supabaseUrl, serviceKey);
       try {
         await candidate.init();
