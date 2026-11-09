@@ -61,7 +61,7 @@ interface WorkspaceContextValue {
     author: string;
     rawText: string;
     url?: string;
-  }) => Promise<{ redactionCount: number; matchedTypes: string[]; sourceId: string }>;
+  }) => Promise<{ redactionCount: number; matchedTypes: string[]; sourceId: string; factsExtracted: number }>;
   reconstruct: () => Promise<void>;
   verify: () => Promise<void>;
   resolveConflict: (conflictId: string, choice: "SOURCE_A" | "SOURCE_B" | "MANUAL_EDIT", note?: string) => Promise<void>;
@@ -204,10 +204,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const data = (await res.json()) as {
         source: { id: string };
         scrub: { redactionCount: number; matchedTypes: string[] };
+        factsExtracted: number;
         state: WorkspaceState;
       };
       setState(data.state);
-      return { redactionCount: data.scrub.redactionCount, matchedTypes: data.scrub.matchedTypes, sourceId: data.source.id };
+      return {
+        redactionCount: data.scrub.redactionCount,
+        matchedTypes: data.scrub.matchedTypes,
+        sourceId: data.source.id,
+        factsExtracted: data.factsExtracted,
+      };
     },
     []
   );

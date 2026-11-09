@@ -303,7 +303,7 @@ export class ProjectStore {
       url?: string;
     },
     actor?: string
-  ): Promise<{ source: SourceArtifact; scrub: { redactionCount: number; matchedTypes: string[] } }> {
+  ): Promise<{ source: SourceArtifact; scrub: { redactionCount: number; matchedTypes: string[] }; factsExtracted: number }> {
     const auditActor = actor ?? this.actorForTier(3);
     let created: SourceArtifact = null as never;
     let scrub: { redactionCount: number; matchedTypes: string[]; sanitizedText: string } = {
@@ -311,6 +311,7 @@ export class ProjectStore {
       matchedTypes: [],
       sanitizedText: "",
     };
+    let factsExtracted = 0;
 
     await this.mutate((state) => {
       scrub = scrubSecrets(input.rawText);
@@ -336,7 +337,9 @@ export class ProjectStore {
       state.sources.push(created);
       // Deterministic candidate extraction: custom sources always yield usable
       // candidate facts even when the LLM reconstruction path is unavailable.
-      state.factsBySource[id] = extractCandidateFacts(created);
+      const candidateFacts = extractCandidateFacts(created);
+      state.factsBySource[id] = candidateFacts;
+      factsExtracted = candidateFacts.length;
       this.logRaw(state, "SOURCE_INGESTED", auditActor, `${id} · ${input.title} (${input.sourceType})`);
       if (scrub.redactionCount > 0) {
         this.logRaw(
@@ -348,7 +351,7 @@ export class ProjectStore {
       }
     });
 
-    return { source: created, scrub };
+    return { source: created, scrub, factsExtracted };
   }
 
   async reconstruct(viewerTier: AccessTier, actor?: string): Promise<void> {

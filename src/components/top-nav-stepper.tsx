@@ -252,7 +252,7 @@ export function TopNavStepper() {
           <DialogHeader>
             <DialogTitle>Reset demo workspace?</DialogTitle>
             <DialogDescription>
-              Restores the original 28-artifact synthetic dataset and wipes all resolutions,
+              Restores the original 8-artifact synthetic dataset and wipes all resolutions,
               interviews, approvals and audit entries.
             </DialogDescription>
           </DialogHeader>

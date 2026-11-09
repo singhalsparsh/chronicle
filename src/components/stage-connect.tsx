@@ -17,6 +17,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { toast } from "sonner";
 import { useWorkspace } from "@/lib/workspace-context";
 import { SourceTypeIcon, TierBadge, fmtDate } from "@/components/shared";
 import type { SourceType } from "@/lib/types";
@@ -131,6 +132,11 @@ export function StageConnect() {
       setRawText("");
       setTitle("");
       setUrl("");
+      if (outcome.factsExtracted === 0) {
+        toast.warning("Source stored, but no project facts were extracted.", {
+          description: "The source appears in the explorer; reconstruct may still surface work from other evidence.",
+        });
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ingestion failed.");
     } finally {

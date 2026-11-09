@@ -75,6 +75,14 @@ export function StageHandover() {
   const audit = state?.auditLog.slice(-10).reverse() ?? [];
 
   const onLock = async () => {
+    // Hostile-audit fix: prevent locking while conflicts are still unresolved.
+    const unresolvedConflicts = state?.conflicts.filter((c) => c.resolution === "UNRESOLVED").length ?? 0;
+    if (unresolvedConflicts > 0) {
+      toast.error("Cannot lock snapshot: Resolve all conflicts first.", {
+        description: `${unresolvedConflicts} conflict(s) still unresolved.`,
+      });
+      return;
+    }
     setBusy("lock");
     try {
       await lockSnapshot();

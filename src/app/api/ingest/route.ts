@@ -56,7 +56,7 @@ export async function POST(request: Request) {
   try {
     const store = getProjectStore();
     const input = parsed.data;
-    const { source, scrub } = await store.ingestSource(
+    const { source, scrub, factsExtracted } = await store.ingestSource(
       {
         title: input.title,
         sourceType: input.sourceType,
@@ -73,6 +73,7 @@ export async function POST(request: Request) {
       ok: true,
       source: toPublicSource(source),
       scrub,
+      factsExtracted,
       github,
       state: toPublicState(state),
     });
