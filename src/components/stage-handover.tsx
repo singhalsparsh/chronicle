@@ -64,7 +64,8 @@ function NextActionRow({ item }: { item: NextActionItem }) {
 }
 
 export function StageHandover() {
-  const { state, lockSnapshot, acknowledgeReceipt, setStage } = useWorkspace();
+  const { state, lockSnapshot, acknowledgeReceipt, setStage, viewer } = useWorkspace();
+  const isMaintainer = viewer?.tier === 3;
   const [busy, setBusy] = useState<"lock" | "receipt" | "export" | null>(null);
 
   const handover = state?.handover;
@@ -274,10 +275,19 @@ export function StageHandover() {
             </div>
 
             <div className="space-y-2">
-              <Button className="w-full" onClick={onLock} disabled={busy !== null || handover?.locked}>
+              <Button
+                className="w-full"
+                onClick={onLock}
+                disabled={busy !== null || handover?.locked || !isMaintainer}
+              >
                 {busy === "lock" ? <Loader2 className="size-4 animate-spin" /> : <LockKeyhole className="size-4" />}
                 {handover?.locked ? "Snapshot v1.0 published" : "Lock & Publish Snapshot v1.0"}
               </Button>
+              {!isMaintainer && !handover?.locked && (
+                <p className="text-center text-[11px] text-muted-foreground">
+                  Requires Maintainer (T3) clearance to lock
+                </p>
+              )}
               {handover?.locked && (
                 <Button className="w-full" variant="outline" onClick={onReceipt} disabled={busy !== null || handover.receiptAcknowledged}>
                   {busy === "receipt" ? <Loader2 className="size-4 animate-spin" /> : <BadgeCheck className="size-4" />}
