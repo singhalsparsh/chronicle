@@ -70,7 +70,7 @@ function SourceRow({ sourceId, onOpen }: { sourceId: string; onOpen: (id: string
 }
 
 export function StageConnect() {
-  const { state, ingest, openInspector, loading } = useWorkspace();
+  const { state, ingest, openInspector, loading, viewer } = useWorkspace();
 
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<SourceType | "ALL">("ALL");
@@ -78,6 +78,7 @@ export function StageConnect() {
   const [title, setTitle] = useState("");
   const [sourceType, setSourceType] = useState<SourceType>("GITHUB_PR");
   const [author, setAuthor] = useState("@guest_judge");
+  const [clearance, setClearance] = useState<1 | 2 | 3>(viewer?.tier ?? 2);
   const [url, setUrl] = useState("");
   const [rawText, setRawText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -126,6 +127,7 @@ export function StageConnect() {
         author: author.trim().startsWith("@") ? author.trim() : `@${author.trim()}`,
         rawText,
         url: url.trim() || undefined,
+        accessTier: clearance,
       });
       setResult(outcome);
       setLocalScrub(null);
@@ -276,6 +278,23 @@ export function StageConnect() {
                   onChange={(e) => setUrl(e.target.value)}
                 />
               </div>
+            </div>
+
+            {/* Clearance */}
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="src-clearance" className="text-xs text-muted-foreground">
+                Clearance level
+              </Label>
+              <Select value={String(clearance)} onValueChange={(v) => setClearance(Number(v) as 1 | 2 | 3)}>
+                <SelectTrigger id="src-clearance" className="h-9 w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">T1 · Restricted</SelectItem>
+                  <SelectItem value="2">T2 · Internal</SelectItem>
+                  <SelectItem value="3">T3 · Confidential</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Raw content */}

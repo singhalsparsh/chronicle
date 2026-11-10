@@ -52,12 +52,19 @@ export function StageReconstructVerify() {
     return category === "ALL" ? sorted : sorted.filter((c) => c.category === category);
   }, [claims, category]);
 
-  // Use the stats computed server-side from the latest API response so the
-  // "Quote grounded" card matches what the verification run actually produced.
-  const verifiedCount = state?.stats.verifiedClaims ?? 0;
-  const missingCount = state?.stats.missingEvidenceClaims ?? 0;
+  // "Quote grounded" is computed from the citation verification flags on the
+  // claims themselves (V-001): a claim counts as grounded when every one of its
+  // citations resolves to a verbatim substring of a real source. This stays
+  // consistent with the per-card badges regardless of aggregate stat freshness.
+  const groundedCount = useMemo(
+    () =>
+      claims.filter(
+        (c) => c.citations.length > 0 && c.citations.every((ct) => ct.verification === "VERIFIED")
+      ).length,
+    [claims]
+  );
   const totalClaims = state?.stats.visibleClaims ?? 0;
-  const coverage = totalClaims > 0 ? Math.round((verifiedCount / totalClaims) * 100) : 0;
+  const coverage = totalClaims > 0 ? Math.round((groundedCount / totalClaims) * 100) : 0;
 
   const isReconstruct = stage === 2;
   const isVerify = stage === 3;
@@ -112,8 +119,8 @@ export function StageReconstructVerify() {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
             <StatTile label="Visible sources" value={state?.stats.visibleSources ?? 0} hint={`${state?.stats.totalSources ?? 0} total`} />
             <StatTile label="Claims" value={state?.stats.visibleClaims ?? 0} hint={`${state?.stats.withheldClaims ?? 0} withheld by role`} />
-            <StatTile label="Quote grounded" value={`${coverage}%`} accent="text-verified" hint={`${verifiedCount} verified`} />
-            <StatTile label="Missing evidence" value={missingCount} accent="text-missing" hint="incl. exit interviews" />
+            <StatTile label="Quote grounded" value={`${coverage}%`} accent="text-verified" hint={`${groundedCount} of ${totalClaims} claims grounded`} />
+            <StatTile label="Missing evidence" value={state?.stats.missingEvidenceClaims ?? 0} accent="text-missing" hint="excl. superseded claims" />
             <StatTile label="Conflicts" value={state?.stats.conflicts ?? 0} accent="text-conflict" hint={`${state?.stats.unresolvedConflicts ?? 0} unresolved`} />
             <StatTile label="Open gaps" value={state?.stats.openGaps ?? 0} accent="text-missing" hint="3-question interviews" />
           </div>
@@ -163,7 +170,7 @@ export function StageReconstructVerify() {
                       <CategoryBadge category={claim.category} />
                       <span className="text-xs text-muted-foreground">{claim.author}</span>
                       <span className="ml-auto">
-                        <ClaimStatusBadge status={claim.status} className="h-5 text-[11px]" />
+                        <ClaimStatusBadge status={claim.status} className="h-5 text-[11px]" superseded={claim.superseded} />
                       </span>
                     </div>
                     <p className="mt-1.5 text-sm font-medium">{claim.title}</p>
@@ -223,9 +230,11 @@ export function StageReconstructVerify() {
                   that source text.
                 </CardDescription>
               </div>
-              <div className="w-32">
+              <div className="w-40">
                 <Progress value={coverage} className="h-1.5" />
-                <p className="mt-1 text-right text-[11px] text-muted-foreground">{coverage}% covered</p>
+                <p className="mt-1 text-right text-[11px] text-muted-foreground">
+                  {coverage}% · {groundedCount}/{totalClaims} grounded
+                </p>
               </div>
             </div>
           </CardHeader>
@@ -235,7 +244,7 @@ export function StageReconstructVerify() {
                 <div key={claim.id} className="rounded-lg border border-border bg-muted/20 p-3">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-mono text-[11px] text-muted-foreground">{claim.id}</span>
-                    <ClaimStatusBadge status={claim.status} className="h-5 text-[11px]" />
+                    <ClaimStatusBadge status={claim.status} className="h-5 text-[11px]" superseded={claim.superseded} />
                   </div>
                   <p className="mt-1.5 text-[13px] font-medium leading-snug">{claim.title}</p>
                   <div className="mt-2 flex flex-col gap-1.5">

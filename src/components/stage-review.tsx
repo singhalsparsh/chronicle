@@ -258,6 +258,7 @@ function GapCard({ gapId }: { gapId: string }) {
   };
 
   if (gap.status === "HUMAN_APPROVED") {
+    const linkedClaims = state?.claims.filter((c) => c.gapId === gap.id).map((c) => c.id) ?? [];
     return (
       <Card>
         <CardContent className="py-3.5">
@@ -270,6 +271,12 @@ function GapCard({ gapId }: { gapId: string }) {
               HUMAN_APPROVED
             </Badge>
           </div>
+          {linkedClaims.length > 0 && (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Linked claim{linkedClaims.length > 1 ? "s" : ""}:{" "}
+              <span className="font-mono">{linkedClaims.join(", ")}</span>
+            </p>
+          )}
           <p className="mt-2 text-xs text-muted-foreground">
             {gap.answers.map((a, i) => (
               <span key={i} className="block">
@@ -382,7 +389,7 @@ function ClaimEditorRow({ claimId }: { claimId: string }) {
         <CategoryBadge category={claim.category} />
         <span className="text-xs text-muted-foreground">{claim.author} · {fmtDate(claim.timestamp)}</span>
         <span className="ml-auto">
-          <ClaimStatusBadge status={claim.status} className="h-5 text-[11px]" />
+          <ClaimStatusBadge status={claim.status} className="h-5 text-[11px]" superseded={claim.superseded} />
         </span>
       </div>
       <p className="mt-1.5 text-sm font-medium">{claim.title}</p>
@@ -434,6 +441,10 @@ export function StageReview() {
           <CardDescription>
             {claims.length} claims · edit summaries manually; edits count as human approval for
             missing-evidence claims.
+          </CardDescription>
+          <CardDescription className="text-[11px]">
+            Status model: Evidence gathered → Verified (all quotes grounded) → Human approved;
+            superseded claims are historical losers of resolved conflicts.
           </CardDescription>
         </CardHeader>
         <CardContent>

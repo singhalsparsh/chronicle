@@ -140,7 +140,6 @@ export class ProjectStore {
   private persistence: Persistence = new MemoryPersistence();
   private state: PersistedState | null = null;
   private ready: Promise<void> | null = null;
-  private seq = 0;
   private persistenceError: string | null = null;
 
   ensureReady(): Promise<void> {
@@ -168,7 +167,6 @@ export class ProjectStore {
         const loaded = await candidate.loadState();
         this.persistence = candidate;
         this.state = loaded ?? buildSeedState();
-        this.seq = this.state.sources.length + this.state.auditLog.length;
         if (!loaded) await this.persistence.saveState(this.state);
         this.persistenceError = null;
         return;
@@ -209,9 +207,11 @@ export class ProjectStore {
   }
 
   private logRaw(state: PersistedState, action: AuditAction, actor: string, detail: string): void {
-    this.seq += 1;
     const entry: AuditLogEntry = {
-      id: `AUD-${String(this.seq).padStart(3, "0")}`,
+      // H-001: audit ids are derived from the current max suffix so they are
+      // globally unique even if the store is re-seeded or reloaded from a
+      // snapshot with a different counter history. Collisions are impossible.
+      id: nextAuditId(state.auditLog),
       ts: new Date().toISOString(),
       actor,
       action,
@@ -275,7 +275,8 @@ export class ProjectStore {
         visibleClaims: visibleClaims.length,
         withheldClaims: withheldClaimCount,
         verifiedClaims: visibleClaims.filter((c) => c.status === "VERIFIED" || c.status === "HUMAN_APPROVED").length,
-        missingEvidenceClaims: visibleClaims.filter((c) => c.status === "MISSING_EVIDENCE").length,
+        missingEvidenceClaims: visibleClaims.filter((c) => c.status === "MISSING_EVIDENCE" && !c.superseded).length,
+        supersededClaims: visibleClaims.filter((c) => c.superseded).length,
         humanApprovedClaims: visibleClaims.filter((c) => c.status === "HUMAN_APPROVED").length,
         conflicts: visibleConflicts.length,
         unresolvedConflicts: visibleConflicts.filter((c) => c.resolution === "UNRESOLVED").length,
@@ -531,6 +532,9 @@ export class ProjectStore {
             claim.status = "HUMAN_APPROVED";
           }
         }
+        // H-003: an approved exit interview is no longer outstanding — drop its
+        // P0 next-action so the handover dashboard does not show stale work.
+        state.nextActions = state.nextActions.filter((n) => n.ref !== gapId);
       }
       this.logRaw(
         state,
@@ -612,8 +616,17 @@ export class ProjectStore {
   }
 }
 
-function buildSeedState(): PersistedState {
-  const seed = normalizeSeed();
+/** Returns the next audit id strictly greater than every existing suffix (H-001). */
+function nextAuditId(entries: AuditLogEntry[]): string {
+  let max = 0;
+  for (const entry of entries) {
+    const match = /^AUD-(\d+)$/.exec(entry.id);
+    if (match) max = Math.max(max, Number(match[1]));
+  }
+  return `AUD-${String(max + 1).padStart(3, "0")}`;
+}
+
+function buildSeedState(): PersistedState {  const seed = normalizeSeed();
   const reconstructed = heuristicReconstruct(seed.sources, seed.factsBySource, seed.gaps, undefined);
   const audit: AuditLogEntry[] = [
     {

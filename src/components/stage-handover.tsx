@@ -229,6 +229,9 @@ export function StageHandover() {
                 <Badge variant="outline" className="h-6 text-[11px] text-missing border-missing/30 bg-missing/10">
                   {state?.stats.missingEvidenceClaims ?? 0} missing-evidence claims
                 </Badge>
+                <Badge variant="outline" className="h-6 text-[11px] text-muted-foreground border-border bg-muted/50">
+                  {state?.stats.supersededClaims ?? 0} superseded (historical)
+                </Badge>
               </div>
               {((state?.stats.unresolvedConflicts ?? 0) > 0 || (state?.stats.openGaps ?? 0) > 0) && (
                 <Button variant="outline" size="sm" className="w-full" onClick={() => setStage(4)}>
@@ -294,6 +297,15 @@ export function StageHandover() {
               {!isMaintainer && !handover?.locked && (
                 <p className="text-center text-[11px] text-muted-foreground">
                   Requires Maintainer (T3) clearance to lock
+                </p>
+              )}
+              {isMaintainer && !handover?.locked && (
+                <p className="text-center text-[11px] text-muted-foreground">
+                  {(state?.stats.unresolvedConflicts ?? 0) > 0
+                    ? `${state?.stats.unresolvedConflicts} conflict(s) must be resolved before locking.`
+                    : (state?.stats.openGaps ?? 0) > 0
+                      ? `${state?.stats.openGaps} exit interview(s) still open before locking.`
+                      : "Snapshot ready — all conflicts resolved and interviews complete."}
                 </p>
               )}
               {handover?.locked && (

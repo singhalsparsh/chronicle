@@ -194,6 +194,7 @@ export interface WorkspaceStats {
   withheldClaims: number;
   verifiedClaims: number;
   missingEvidenceClaims: number;
+  supersededClaims: number;
   humanApprovedClaims: number;
   conflicts: number;
   unresolvedConflicts: number;

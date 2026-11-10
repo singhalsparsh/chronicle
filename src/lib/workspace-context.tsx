@@ -61,6 +61,7 @@ interface WorkspaceContextValue {
     author: string;
     rawText: string;
     url?: string;
+    accessTier?: 1 | 2 | 3;
   }) => Promise<{ redactionCount: number; matchedTypes: string[]; sourceId: string; factsExtracted: number }>;
   reconstruct: () => Promise<void>;
   verify: () => Promise<void>;
@@ -190,6 +191,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       author: string;
       rawText: string;
       url?: string;
+      accessTier?: 1 | 2 | 3;
     }) => {
       const res = await fetch("/api/ingest", {
         method: "POST",

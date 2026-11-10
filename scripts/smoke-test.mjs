@@ -78,6 +78,22 @@ ok(
 for (const id of ["CT-001", "CT-002"]) {
   r = await req("POST", "/api/handover", { cookie: alexCookie, body: { action: "resolve_conflict", conflictId: id, choice: "SOURCE_A" } });
 }
+
+// Complete the exit interview, then assert stale P0 actions are pruned and
+// audit ids are globally unique (H-001 / H-003).
+r = await req("POST", "/api/handover", { cookie: alexCookie, body: { action: "submit_interview", gapId: "gap-1", answers: ["wire DLQ alarm", "@sparsh_s with review from @alex_dev", "DLQ depth > 0 for 5 min"] } });
+ok("T3 submit_interview -> 200", r.status === 200, `got ${r.status}`);
+
+r = await req("GET", "/api/reconstruct", { cookie: alexCookie });
+const tasks = r.data.state.nextActions.map((n) => n.task);
+ok(
+  "completed interview removed from next actions",
+  !tasks.some((t) => t.startsWith("Close exit interview")),
+  `tasks=${JSON.stringify(tasks)}`
+);
+const auditIds = r.data.state.auditLog.map((e) => e.id);
+ok("audit ids globally unique", new Set(auditIds).size === auditIds.length, JSON.stringify(auditIds));
+
 r = await req("POST", "/api/handover", { cookie: alexCookie, body: { action: "lock_snapshot" } });
 ok("T3 lock_snapshot after resolving all conflicts -> 200", r.status === 200 && r.data?.ok === true, `got ${r.status}`);
 

@@ -10,6 +10,7 @@ import {
   CircleSlash2,
   CircleDashed,
   ShieldAlert,
+  Archive,
 } from "lucide-react";
 import type { AccessTier, ClaimStatus, EvidenceCategory, SourceType } from "@/lib/types";
 import { CATEGORY_LABEL, SOURCE_TYPE_LABEL, TIER_KEYS } from "@/lib/types";
@@ -106,7 +107,17 @@ const STATUS_META: Record<ClaimStatus, { icon: typeof CheckCircle2; label: strin
   },
 };
 
-export function ClaimStatusBadge({ status, className }: { status: ClaimStatus; className?: string }) {
+export function ClaimStatusBadge({ status, className, superseded }: { status: ClaimStatus; className?: string; superseded?: boolean }) {
+  // Superseded claims are historical losers of resolved conflicts — never show
+  // them as plain "Missing evidence" (H-002 / V-002).
+  if (superseded) {
+    return (
+      <Badge variant="outline" className={`border-border bg-muted/60 text-muted-foreground ${className ?? ""}`}>
+        <Archive className="size-3 mr-1" data-icon="inline-start" />
+        Superseded
+      </Badge>
+    );
+  }
   const meta = STATUS_META[status];
   const Icon = meta.icon;
   return (
