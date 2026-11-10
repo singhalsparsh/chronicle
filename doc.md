@@ -224,7 +224,7 @@ All checks run against the production build (`npm run build` → `npm run start`
 | Seed integrity | GET `/api/reconstruct` (T3) | ✓ 8 sources, 9 claims, 2 conflicts, 1 gap |
 | Conflict detection | engine output | ✓ `db pooler` DOC-01→GH-PR-86; `session auth` DOC-02→GH-PR-84; `webhook retries` DOC-04→GH-PR-91, each recommended SOURCE_B |
 | Quote grounding | POST `/api/verify` | ✓ 46 verified, 2 downgraded (C-020 absent quote; C-016 scrubbed-secret quote) |
-| Secret scrubbing | POST `/api/ingest` w/ demo snippet | ✓ `redactions=4`, types OPENAI_STRIPE_KEY/GITHUB_TOKEN/POSTGRES_URL/PRIVATE_EMAIL; stored sanitized |
+| Secret scrubbing | POST `/api/ingest` w/ demo snippet | ✓ `redactions=4`, types OPENAI_STRIPE_KEY/GITHUB_TOKEN/DATABASE_URL/PRIVATE_EMAIL; stored sanitized |
 | RBAC zero-leakage | GET with `x-viewer-tier: 1` | ✓ 4 sources / 7 claims visible, 24 sources + 40 claims withheld, 0 over-tier claims, confidential sources gone |
 | Conflict resolution | POST `resolve_conflict CT-001 SOURCE_B` | ✓ unresolved count 3 → 2, audit entry written |
 | Exit interview | POST `submit_interview` (3 answers) | ✓ gap status → `HUMAN_APPROVED`, open gaps 3 → 2 |

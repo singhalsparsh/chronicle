@@ -308,7 +308,7 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
 /*                                                                      */
 /* When OPENAI_API_KEY or GEMINI_API_KEY is present, sanitized source    */
 /* text is sent to the model and the response is forced through strict   */
-/* Zod validation (array of claims). Any failure or timeout (6 s)        */
+/* Zod validation (array of claims). Any failure or timeout (30 s)       */
 /* falls back to the deterministic heuristic path so the demo never      */
 /* breaks.                                                               */
 /* ------------------------------------------------------------------ */
@@ -373,7 +373,7 @@ async function requestLlmJson(prompt: string, apiKey: string, isGemini: boolean)
     ? process.env.GEMINI_MODEL?.trim() || "gemini-3.5-flash"
     : "gpt-4o-mini";
   const endpoint = isGemini
-    ? `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
+    ? `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
     : "https://api.openai.com/v1/chat/completions";
 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -393,7 +393,10 @@ async function requestLlmJson(prompt: string, apiKey: string, isGemini: boolean)
         ],
       });
 
-  if (!isGemini) headers.Authorization = `Bearer ${apiKey}`;
+  // Keys are sent in headers only — never in the URL query string, where they
+  // could end up in access logs.
+  if (isGemini) headers["x-goog-api-key"] = apiKey;
+  else headers.Authorization = `Bearer ${apiKey}`;
 
   const res = await fetchWithTimeout(endpoint, { method: "POST", headers, body }, LLM_TIMEOUT_MS);
   if (!res.ok) throw new Error(`LLM request failed: ${res.status}`);

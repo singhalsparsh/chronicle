@@ -8,6 +8,7 @@
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { getUserById } from "./demo-users";
+import { resolveSessionSecret } from "./session-secret";
 import type { DemoUser } from "./demo-users";
 
 export interface Viewer {
@@ -20,14 +21,8 @@ export interface Viewer {
 export const SESSION_COOKIE = "chronicle_session";
 export const SESSION_MAX_AGE_SECONDS = 8 * 60 * 60; // 8h
 
-const DEV_FALLBACK_SECRET = "chronicle-dev-session-secret-v1";
-
 function sessionSecret(): string {
-  const env = process.env.SESSION_SECRET;
-  if (env && env.trim()) return env.trim();
-  // Stable dev fallback (NOT per-request random; never shipped for production).
-  console.warn("SESSION_SECRET not set; using dev fallback — do not use in production");
-  return DEV_FALLBACK_SECRET;
+  return resolveSessionSecret();
 }
 
 function sign(payload: string): string {

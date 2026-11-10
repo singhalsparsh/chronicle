@@ -65,6 +65,23 @@ const alexLogin = await req("POST", "/api/session", { body: { userId: "alex" } }
 ok("login alex -> 200 with Set-Cookie", alexLogin.status === 200 && Boolean(alexLogin.setCookie), `got ${alexLogin.status}`);
 const alexCookie = alexLogin.setCookie.split(";")[0];
 
+// 4b. Ingest tier clamp: a T1 viewer may never write a T3 source.
+r = await req("POST", "/api/ingest", {
+  cookie,
+  body: {
+    title: "T1 Attempted T3 Source",
+    sourceType: "JIRA_TICKET",
+    author: "@jordan_t1",
+    rawText: "We decided to document a confidential thing for the audit.",
+    accessTier: 3,
+  },
+});
+ok(
+  "T1 ingest with accessTier=3 is clamped to tier 1",
+  r.status === 200 && r.data?.source?.accessTier === 1,
+  `got ${r.status} tier=${r.data?.source?.accessTier}`
+);
+
 r = await req("POST", "/api/handover", { cookie: alexCookie, body: { action: "reset_demo" } });
 ok("T3 reset_demo -> 200", r.status === 200, `got ${r.status}`);
 

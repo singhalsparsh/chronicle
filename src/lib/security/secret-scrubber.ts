@@ -1,8 +1,13 @@
 /**
  * Chronicle — Regex Secret Scrubber.
  *
- * Deterministic, single-pass scrubber for API keys, tokens, database URIs and
- * private email addresses. Every match is replaced with [REDACTED_SECRET].
+ * Deterministic, single-pass scrubber for API keys, tokens, database URIs,
+ * private keys and private email addresses. Every match is replaced with
+ * [REDACTED_SECRET].
+ *
+ * All token patterns are anchored with a leading word boundary (`\b`) so
+ * ordinary hyphenated English words like `task-management-service` (which
+ * contains `sk-m…`) are never redacted.
  */
 export const REDACTION_PLACEHOLDER = "[REDACTED_SECRET]";
 
@@ -10,7 +15,11 @@ export type SecretType =
   | "OPENAI_STRIPE_KEY"
   | "GITHUB_TOKEN"
   | "AWS_ACCESS_KEY"
-  | "POSTGRES_URL"
+  | "GOOGLE_API_KEY"
+  | "SLACK_TOKEN"
+  | "JWT_TOKEN"
+  | "PRIVATE_KEY"
+  | "DATABASE_URL"
   | "PRIVATE_EMAIL";
 
 export interface ScrubResult {
@@ -20,22 +29,36 @@ export interface ScrubResult {
 }
 
 const COMBINED_PATTERN =
-  // OpenAI / Stripe: sk-live-..., sk_live_..., sk-...
-  "(?:sk[-_][a-zA-Z0-9_-]{12,})" +
-  // GitHub fine-grained PAT: ghp_...
-  "|(?:ghp_[a-zA-Z0-9]{16,})" +
-  // AWS access key id: AKIA...
-  "|(?:AKIA[0-9A-Z]{16})" +
-  // Postgres connection strings
-  "|(?:postgres(?:ql)?://[^\\s\"'<>]+)" +
+  // OpenAI / Stripe keys: sk-live-..., sk_live_..., sk-...
+  "(?:\\bsk[-_][a-zA-Z0-9_-]{12,})" +
+  // GitHub classic PATs: ghp_...
+  "|(?:\\bghp_[a-zA-Z0-9]{16,})" +
+  // GitHub fine-grained PATs: github_pat_...
+  "|(?:\\bgithub_pat_[a-zA-Z0-9_]{20,})" +
+  // AWS access key ids: AKIA...
+  "|(?:\\bAKIA[0-9A-Z]{16})" +
+  // Google API keys: AIza...
+  "|(?:\\bAIza[0-9A-Za-z_-]{35})" +
+  // Slack tokens: xoxb-/xoxp-/xoxa-/xoxr-/xoxs-...
+  "|(?:\\bxox[baprs]-[a-zA-Z0-9-]{10,})" +
+  // JWT / Bearer tokens
+  "|(?:\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{5,})" +
+  // PEM private key blocks (redact the entire block)
+  "|(?:-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----)" +
+  // Database connection URIs
+  "|(?:\\b(?:postgres(?:ql)?|mysql|mongodb(?:\\+srv)?|redis|amqp)://[^\\s\"'<>]+)" +
   // Email addresses (private PII)
   "|(?:[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})";
 
 function classifySecret(value: string): SecretType {
   if (/^sk[-_]/.test(value)) return "OPENAI_STRIPE_KEY";
-  if (/^ghp_/.test(value)) return "GITHUB_TOKEN";
+  if (/^(?:ghp_|github_pat_)/.test(value)) return "GITHUB_TOKEN";
   if (/^AKIA/.test(value)) return "AWS_ACCESS_KEY";
-  if (/^postgres(?:ql)?:\/\//.test(value)) return "POSTGRES_URL";
+  if (/^AIza/.test(value)) return "GOOGLE_API_KEY";
+  if (/^xox/.test(value)) return "SLACK_TOKEN";
+  if (/^eyJ/.test(value)) return "JWT_TOKEN";
+  if (/^-----BEGIN/.test(value)) return "PRIVATE_KEY";
+  if (/^(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp):\/\//.test(value)) return "DATABASE_URL";
   return "PRIVATE_EMAIL";
 }
 

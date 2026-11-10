@@ -56,13 +56,19 @@ export async function POST(request: Request) {
   try {
     const store = getProjectStore();
     const input = parsed.data;
+    // RBAC: a viewer may never write an artifact above their own clearance.
+    // Clamp the requested tier to the viewer's tier before it reaches the store.
+    const accessTier: 1 | 2 | 3 =
+      input.accessTier === undefined
+        ? viewer.tier
+        : (Math.min(input.accessTier, viewer.tier) as 1 | 2 | 3);
     const { source, scrub, factsExtracted } = await store.ingestSource(
       {
         title: input.title,
         sourceType: input.sourceType,
         author: input.author,
         rawText: input.rawText,
-        accessTier: input.accessTier,
+        accessTier,
         url: input.url,
       },
       `${viewer.name} (${viewer.id})`

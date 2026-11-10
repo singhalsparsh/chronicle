@@ -7,12 +7,20 @@ extend it without breaking things.
 
 Chronicle is a Next.js 16 (App Router, TypeScript, Tailwind v4, shadcn/ui Base UI) web app:
 **Evidence-Linked Project State Reconstruction & Permissioned Handover**. It rebuilds the state of a
-software project from raw artifacts (GitHub PRs, Slack threads, Jira tickets, Notion docs) and hands
-it off to an incoming owner with role-based visibility, quote-grounded citations, and an audit trail.
+software project from raw evidence artifacts and hands it off to an incoming owner with role-based
+visibility, quote-grounded citations, and an audit trail.
+
+**What is actually integrated (no overclaiming):**
+- GitHub PR ingestion fetches the **title/body** of a public PR via the GitHub API. It does *not*
+  fetch comments, reviews, or diffs.
+- Slack threads, Jira tickets, and Notion docs are ingested as **pasted text** — there is no live
+  integration with those platforms.
+- Everything else in the demo (the 8-artifact workspace) is a **seeded synthetic dataset** for
+  `Core-Payments-Service`.
 
 Entry is a one-click demo identity (Alex T3 / Sam T2 / Jordan T1) bound to a signed session cookie;
-no passwords. The workspace is pre-seeded with an 8-artifact synthetic dataset for
-`Core-Payments-Service`.
+no passwords. **This is a demo login, not user authentication** — anyone with access can assume any
+of the three roles, so RBAC here demonstrates the permission model, not a security boundary.
 
 ### Round 3 features (implemented)
 
@@ -22,8 +30,8 @@ no passwords. The workspace is pre-seeded with an 8-artifact synthetic dataset f
   downloadable Markdown packet (verified claims, who-to-ask, next actions, evidence sources, audit
   log). Guarded with 409 until the snapshot is locked.
 - **Real GitHub ingestion** â€” pasting a `github.com/{owner}/{repo}/pull/{n}` URL fetches the real
-  PR title/body from the GitHub public API (graceful fallback on rate-limit/unreachable/private),
-  then runs it through the scrubber + Zod.
+  PR **title/body** from the GitHub public API (graceful fallback on rate-limit/unreachable/private),
+  then runs it through the scrubber + Zod. Other platforms (Slack/Jira/Notion) are pasted text.
 - **Voice-to-text exit interviews** â€” microphone buttons on each interview question use the browser
   Web Speech API (`window.SpeechRecognition` / `webkitSpeechRecognition`) with a graceful fallback
   to typing when unsupported.

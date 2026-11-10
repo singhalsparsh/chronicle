@@ -61,6 +61,13 @@ const SECRET_TOKENS = [
   "postgres://user:password@db.example.com:5432/prod",
   "alex.dev@protonmail.com",
 ];
+const EXPECTED_SECRET_TYPES = [
+  "OPENAI_STRIPE_KEY",
+  "GITHUB_TOKEN",
+  "AWS_ACCESS_KEY",
+  "DATABASE_URL",
+  "PRIVATE_EMAIL",
+];
 const SECRET_RAW = `We decided to migrate staging and rotate the deployment token ${SECRET_TOKENS.join(", ")} before handover.`;
 const secretIngest = await req("POST", "/api/ingest", {
   cookie: alex,
@@ -79,7 +86,6 @@ record(
     secretIngest.data?.scrub?.matchedTypes
   )}`
 );
-
 // Reconstruct so the ingested source participates in claims + quotes.
 await req("POST", "/api/reconstruct", { cookie: alex, body: {} });
 
@@ -199,7 +205,10 @@ const tenIngest = await req("POST", "/api/ingest", {
 const types = tenIngest.data?.scrub?.matchedTypes ?? [];
 record(
   "P5c ingest 10 secrets -> redactionCount=10, all 5 types",
-  tenIngest.status === 200 && tenIngest.data?.scrub?.redactionCount === 10 && types.length === 5,
+  tenIngest.status === 200 &&
+    tenIngest.data?.scrub?.redactionCount === 10 &&
+    types.length === 5 &&
+    EXPECTED_SECRET_TYPES.every((t) => types.includes(t)),
   `got ${tenIngest.status} count=${tenIngest.data?.scrub?.redactionCount} types=${JSON.stringify(types)}`
 );
 const wireTen = await req("GET", "/api/reconstruct", { cookie: alex });
