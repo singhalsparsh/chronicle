@@ -82,6 +82,10 @@ ok(
   `got ${r.status} tier=${r.data?.source?.accessTier}`
 );
 
+// N1: `null` body must be a clean 400, never a 500.
+r = await req("POST", "/api/ingest", { cookie, body: null });
+ok("ingest null body -> 400 (not 500)", r.status === 400, `got ${r.status}`);
+
 r = await req("POST", "/api/handover", { cookie: alexCookie, body: { action: "reset_demo" } });
 ok("T3 reset_demo -> 200", r.status === 200, `got ${r.status}`);
 

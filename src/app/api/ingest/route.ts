@@ -25,6 +25,11 @@ export async function POST(request: Request) {
     url?: unknown;
   }>(request);
   if (isErrorResponse(body)) return body;
+  // `null`, arrays, and primitives parse as valid JSON but are not an ingest
+  // object — reject before any property access to avoid a 500 (N1).
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return jsonError(400, "VALIDATION_FAILED", "Ingest payload must be a JSON object.");
+  }
 
   let github = { fetched: false as boolean, reason: "not-a-github-pr-url" as string | undefined };
 

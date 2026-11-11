@@ -1,4 +1,4 @@
--- Chronicle — Postgres schema regression checks (run after migrations 001-004).
+-- Chronicle — Postgres schema regression checks (run after migrations 001-005).
 -- Exits non-zero via RAISE EXCEPTION if any assertion fails.
 do $$
 begin
@@ -33,7 +33,48 @@ begin
       and (qual ~ 'jsonb_array_elements_text' or with_check ~ 'jsonb_array_elements_text');
   if found then raise exception 'gaps policies still cast source_ids'; end if;
 
-  -- Round-trip shapes the adapter sends:
+  -- 7. conflicts.access_tier exists
+  perform 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'conflicts' and column_name = 'access_tier';
+  if not found then raise exception 'conflicts.access_tier missing'; end if;
+
+  -- 8. gaps access_tier uses MIN semantics: a gap linking a T1 and a T3
+  --    source must be tier 1 (visible to a T1 viewer).
+  insert into public.sources (id, type, title, author, created_at, access_tier, raw_content, sanitized_content)
+    values
+      ('SRC-T1', 'SLACK_THREAD', 's', '@a', now(), 1, 'x', 'x'),
+      ('SRC-T3', 'NOTION_DOC', 's', '@b', now(), 3, 'x', 'x');
+  insert into public.gaps (id, title, description, source_ids, questions, suggested_answers, answers, status, access_tier)
+    values ('GAP-TEST', 'g', 'd', '["SRC-T1","SRC-T3"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, 'MISSING_EVIDENCE', 3);
+  update public.gaps g
+    set access_tier = coalesce(
+      (select min(s.access_tier)
+         from jsonb_array_elements_text(g.source_ids) as ids(value)
+         join public.sources s on s.id = ids.value),
+      3
+    )
+    where g.id = 'GAP-TEST';
+  perform 1 from public.gaps where id = 'GAP-TEST' and access_tier = 1;
+  if not found then raise exception 'gaps access_tier not MIN semantics'; end if;
+
+  -- 9. conflicts.access_tier derives from the linked claims (max of both sides)
+  insert into public.claims (id, category, title, summary, timestamp, author, access_tier, status, citations)
+    values
+      ('C-T1', 'DECISION', 'a', 'b', now(), '@a', 1, 'VERIFIED', '[]'::jsonb),
+      ('C-T3', 'DECISION', 'a', 'b', now(), '@b', 3, 'VERIFIED', '[]'::jsonb);
+  insert into public.conflicts (id, subject, source_a, source_b, corroborating_b, recommendation, resolution, access_tier)
+    values ('CT-TEST', 'sub', jsonb_build_object('claimId', 'C-T1'), jsonb_build_object('claimId', 'C-T3'), '[]'::jsonb, 'SOURCE_A', 'UNRESOLVED', 1);
+  update public.conflicts c
+    set access_tier = (
+      select max(cl.access_tier)
+        from public.claims cl
+        where cl.id in (c.source_a ->> 'claimId', c.source_b ->> 'claimId')
+    )
+    where c.id = 'CT-TEST';
+  perform 1 from public.conflicts where id = 'CT-TEST' and access_tier = 3;
+  if not found then raise exception 'conflicts access_tier not derived from claims'; end if;
+
+  -- 10. Round-trip shapes the adapter sends:
   insert into public.claims (id, category, title, summary, timestamp, author, access_tier, status, superseded, citations)
     values ('C-TEST', 'DECISION', 't', 's', now(), '@a', 3, 'VERIFIED', true, '[]'::jsonb);
 

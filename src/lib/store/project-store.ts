@@ -215,7 +215,11 @@ export class ProjectStore {
       ts: new Date().toISOString(),
       actor,
       action,
-      detail,
+      // N4: user-controlled strings (titles, notes) may contain newlines,
+      // ANSI escapes, or control characters — strip them so audit details
+      // cannot forge log lines, break markdown tables, or carry terminal
+      // injection payloads.
+      detail: sanitizeForLog(detail),
     };
     state.auditLog.push(entry);
     if (state.auditLog.length > 200) {
@@ -624,6 +628,13 @@ function nextAuditId(entries: AuditLogEntry[]): string {
     if (match) max = Math.max(max, Number(match[1]));
   }
   return `AUD-${String(max + 1).padStart(3, "0")}`;
+}
+
+/** Strips control characters and collapses line breaks in log payloads (N4). */
+function sanitizeForLog(text: string): string {
+  return text
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
+    .replace(/\r?\n/g, " ");
 }
 
 function buildSeedState(): PersistedState {  const seed = normalizeSeed();
