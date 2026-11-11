@@ -257,7 +257,12 @@ export class ProjectStore {
       (item) => item.ref.startsWith("C-") ? visibleClaimIds.has(item.ref) : visibleGaps.some((g) => g.id === item.ref)
     );
 
-    const visibleWhoToAsk = state.whoToAsk.filter((entry) => visibleSourceIds.has(entry.handle) || state.sources.some((s) => s.author === entry.handle && visibleSourceIds.has(s.id)));
+    const visibleWhoToAsk = state.whoToAsk.filter(
+      (entry) =>
+        // entry.handle is an author handle (e.g. @alex_dev); it is never a
+        // source id — only the author-match clause is meaningful.
+        state.sources.some((s) => s.author === entry.handle && visibleSourceIds.has(s.id))
+    );
 
     return {
       mode: this.persistence.mode,

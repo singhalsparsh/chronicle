@@ -210,7 +210,11 @@ export class SupabaseRelationalPersistence {
       ref: n.ref,
       access_tier: n.ref.startsWith("C-")
         ? state.claims.find((c) => c.id === n.ref)?.accessTier ?? 2
-        : state.gaps.find((g) => g.id === n.ref)?.sourceIds.length ? 2 : 2,
+        : Math.max(
+            1,
+            ...(state.gaps.find((g) => g.id === n.ref)?.sourceIds ?? [])
+              .map((sid) => state.sources.find((s) => s.id === sid)?.accessTier ?? 1)
+          ),
     })));
     await this.upsertRows("who_to_ask", state.whoToAsk.map((w) => ({
       handle: w.handle,

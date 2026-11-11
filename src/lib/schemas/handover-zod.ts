@@ -192,6 +192,7 @@ export const WorkspaceStatsSchema = z.object({
   withheldClaims: z.number().int().nonnegative(),
   verifiedClaims: z.number().int().nonnegative(),
   missingEvidenceClaims: z.number().int().nonnegative(),
+  supersededClaims: z.number().int().nonnegative(),
   humanApprovedClaims: z.number().int().nonnegative(),
   conflicts: z.number().int().nonnegative(),
   unresolvedConflicts: z.number().int().nonnegative(),
