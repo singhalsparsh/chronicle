@@ -259,7 +259,7 @@ Eight findings from an external audit were remediated:
 | E-2 | Mutations not tier-scoped | Tier guards on resolve/edit/interview (403) and verify scoped to viewer clearance, using existing `computeClaimAccessTier`. |
 | E-3 | Export lacked verbatim quotes | §2 now lists `- [SOURCE_ID] "quote"` per claim. |
 
-To activate relational persistence, run `supabase/migrations/002_relational_persistence_rls.sql` in your Supabase project (after 001). Without it, the app gracefully falls back to the in-memory store and keeps working.
+To activate relational persistence, apply `supabase/migrations/001` through `004` in order (schemas, RLS, tier-gated writes, and schema-compat fixes) in your Supabase project. Without it, the app gracefully falls back to the in-memory store and keeps working.
 
 ## 7. Round 3 Commitments
 

@@ -135,7 +135,12 @@ export class SupabaseRelationalPersistence {
     };
 
     const parsed = PersistedStateSchema.safeParse(candidate);
-    return parsed.success ? parsed.data : null;
+    if (!parsed.success) {
+      // Schema drift must be loud: treating it as "empty database" would make
+      // ProjectStore re-seed and overwrite real data.
+      throw new Error(`persisted state failed validation: ${parsed.error.issues.length} issue(s)`);
+    }
+    return parsed.data;
   }
 
   /* ------------------------------ Save ------------------------------ */
@@ -195,7 +200,10 @@ export class SupabaseRelationalPersistence {
       status: g.status,
       approved_at: g.approvedAt ?? null,
     })));
-    await this.upsertRows("next_actions", state.nextActions.map((n) => ({
+    // next_actions are fully derived on every reconstruction and have no
+    // natural key — replace the whole list instead of upserting, so repeated
+    // saves never accumulate duplicates.
+    await this.deleteThenInsert("next_actions", state.nextActions.map((n) => ({
       task: n.task,
       owner_hint: n.ownerHint ?? null,
       priority: n.priority,
@@ -211,7 +219,7 @@ export class SupabaseRelationalPersistence {
       fact_count: w.factCount,
       topics: w.topics,
       access_tier: 3,
-    })));
+    })), "handle");
     await this.upsertRows("handover", [{
       id: 1,
       version: state.handover.version,
@@ -262,14 +270,33 @@ export class SupabaseRelationalPersistence {
     };
   }
 
-  private async upsertRows(table: string, rows: Record<string, unknown>[]): Promise<void> {
+  private async upsertRows(table: string, rows: Record<string, unknown>[], conflict?: string): Promise<void> {
     if (rows.length === 0) return;
-    const res = await fetch(`${this.baseUrl}/${table}`, {
+    const conflictQuery = conflict ? `?on_conflict=${encodeURIComponent(conflict)}` : "";
+    const res = await fetch(`${this.baseUrl}/${table}${conflictQuery}`, {
       method: "POST",
       headers: this.headers("resolution=merge-duplicates"),
       body: JSON.stringify(rows),
     });
     if (!res.ok) throw new Error(`${table} save failed (${res.status})`);
+  }
+
+  private async deleteThenInsert(table: string, rows: Record<string, unknown>[]): Promise<void> {
+    if (rows.length === 0) {
+      // Still clear stale rows when the new list is empty.
+      const clear = await fetch(`${this.baseUrl}/${table}`, {
+        method: "DELETE",
+        headers: this.headers(),
+      });
+      if (!clear.ok) throw new Error(`${table} clear failed (${clear.status})`);
+      return;
+    }
+    const del = await fetch(`${this.baseUrl}/${table}`, {
+      method: "DELETE",
+      headers: this.headers(),
+    });
+    if (!del.ok) throw new Error(`${table} clear failed (${del.status})`);
+    await this.insertRows(table, rows);
   }
 
   private async insertRows(table: string, rows: Record<string, unknown>[]): Promise<void> {

@@ -29,3 +29,45 @@ jobs:
 
       - name: Production build
         run: npm run build
+
+  postgres-schema:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: chronicle_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stub Supabase auth.jwt()
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          create schema if not exists auth;
+          create or replace function auth.jwt() returns jsonb
+            language sql stable as $$ select '{}'::jsonb $$;
+          SQL
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/chronicle_test
+
+      - name: Apply migrations 001-004
+        run: |
+          for f in supabase/migrations/*.sql; do
+            echo "Applying $f"
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
+          done
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/chronicle_test
+
+      - name: Schema + round-trip assertions
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f .github/workflows/postgres-schema-checks.sql
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/chronicle_test
