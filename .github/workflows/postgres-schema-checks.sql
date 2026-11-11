@@ -1,4 +1,4 @@
--- Chronicle — Postgres schema regression checks (run after migrations 001-005).
+-- Chronicle — Postgres schema regression checks (run after migrations 001-006).
 -- Exits non-zero via RAISE EXCEPTION if any assertion fails.
 do $$
 begin
@@ -12,9 +12,9 @@ begin
     where table_schema = 'public' and table_name = 'audit_log' and column_name = 'id' and data_type = 'text';
   if not found then raise exception 'audit_log.id is not text'; end if;
 
-  -- 3. next_actions unique index on task
-  perform 1 from pg_indexes where schemaname = 'public' and tablename = 'next_actions' and indexname = 'idx_next_actions_task_unique';
-  if not found then raise exception 'next_actions unique index missing'; end if;
+  -- 3. next_actions unique index on (ref, task)
+  perform 1 from pg_indexes where schemaname = 'public' and tablename = 'next_actions' and indexname = 'idx_next_actions_ref_task_unique';
+  if not found then raise exception 'next_actions (ref,task) unique index missing'; end if;
 
   -- 4. gaps.access_tier exists
   perform 1 from information_schema.columns

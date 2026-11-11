@@ -178,32 +178,46 @@ export class SupabaseRelationalPersistence {
       superseded: c.superseded ?? false,
       citations: c.citations,
     })));
-    await this.upsertRows("conflicts", state.conflicts.map((c) => ({
-      id: c.id,
-      subject: c.subject,
-      source_a: c.sourceA,
-      source_b: c.sourceB,
-      corroborating_b: c.corroboratingB,
-      recommendation: c.recommendation,
-      resolution: c.resolution,
-      manual_note: c.manualNote ?? null,
-      resolved_at: c.resolvedAt ?? null,
-    })));
-    await this.upsertRows("gaps", state.gaps.map((g) => ({
-      id: g.id,
-      title: g.title,
-      description: g.description,
-      source_ids: g.sourceIds,
-      questions: g.questions,
-      suggested_answers: g.suggestedAnswers,
-      answers: g.answers,
-      status: g.status,
-      approved_at: g.approvedAt ?? null,
-    })));
+    await this.upsertRows("conflicts", state.conflicts.map((c) => {
+      const sideTiers = [c.sourceA.claimId, c.sourceB.claimId]
+        .map((claimId) => state.claims.find((cl) => cl.id === claimId)?.accessTier ?? 1);
+      return {
+        id: c.id,
+        subject: c.subject,
+        source_a: c.sourceA,
+        source_b: c.sourceB,
+        corroborating_b: c.corroboratingB,
+        recommendation: c.recommendation,
+        resolution: c.resolution,
+        manual_note: c.manualNote ?? null,
+        resolved_at: c.resolvedAt ?? null,
+        // RLS reads this column; it must reflect the max tier of the two sides.
+        access_tier: Math.max(1, ...sideTiers),
+      };
+    }));
+    await this.upsertRows("gaps", state.gaps.map((g) => {
+      const sourceTiers = g.sourceIds
+        .map((sid) => state.sources.find((s) => s.id === sid)?.accessTier)
+        .filter((t): t is AccessTier => t !== undefined);
+      return {
+        id: g.id,
+        title: g.title,
+        description: g.description,
+        source_ids: g.sourceIds,
+        questions: g.questions,
+        suggested_answers: g.suggestedAnswers,
+        answers: g.answers,
+        status: g.status,
+        approved_at: g.approvedAt ?? null,
+        // RLS reads this column; visibility requires min-tier of linked sources.
+        access_tier: sourceTiers.length > 0 ? Math.min(...sourceTiers) : 3,
+      };
+    }));
     // next_actions are fully derived on every reconstruction and have no
-    // natural key — replace the whole list instead of upserting, so repeated
-    // saves never accumulate duplicates.
-    await this.deleteThenInsert("next_actions", state.nextActions.map((n) => ({
+    // natural key — upsert on (ref, task), then delete rows that are no longer
+    // part of the derived list. The upsert runs first, so a failed insert
+    // leaves the previous list intact (no wipe-before-write window).
+    await this.replaceNextActions(state.nextActions.map((n) => ({
       task: n.task,
       owner_hint: n.ownerHint ?? null,
       priority: n.priority,
@@ -285,22 +299,42 @@ export class SupabaseRelationalPersistence {
     if (!res.ok) throw new Error(`${table} save failed (${res.status})`);
   }
 
-  private async deleteThenInsert(table: string, rows: Record<string, unknown>[]): Promise<void> {
+  /**
+   * Replaces the next_actions list. Upserts on (ref, task) first and only then
+   * deletes rows that are no longer part of the derived list, so a failed
+   * upsert leaves the previous data intact (no wipe-before-write window).
+   */
+  private async replaceNextActions(rows: Record<string, unknown>[]): Promise<void> {
+    const table = "next_actions";
     if (rows.length === 0) {
-      // Still clear stale rows when the new list is empty.
-      const clear = await fetch(`${this.baseUrl}/${table}`, {
+      // All rows are stale — clear the table. `id=neq.0` is a safe filtered
+      // delete that PostgREST accepts (it refuses unfiltered DELETEs).
+      const clear = await fetch(`${this.baseUrl}/${table}?id=neq.0`, {
         method: "DELETE",
         headers: this.headers(),
       });
       if (!clear.ok) throw new Error(`${table} clear failed (${clear.status})`);
       return;
     }
-    const del = await fetch(`${this.baseUrl}/${table}`, {
+
+    const upsert = await fetch(`${this.baseUrl}/${table}?on_conflict=${encodeURIComponent("ref,task")}`, {
+      method: "POST",
+      headers: this.headers("resolution=merge-duplicates,return=representation"),
+      body: JSON.stringify(rows),
+    });
+    if (!upsert.ok) throw new Error(`${table} save failed (${upsert.status})`);
+
+    const written = (await upsert.json()) as { id?: number }[];
+    const ids = written.map((r) => r.id).filter((id): id is number => typeof id === "number");
+    const orphanUrl =
+      ids.length > 0
+        ? `${this.baseUrl}/${table}?id=not.in.(${ids.join(",")})`
+        : `${this.baseUrl}/${table}?id=neq.0`;
+    const del = await fetch(orphanUrl, {
       method: "DELETE",
       headers: this.headers(),
     });
-    if (!del.ok) throw new Error(`${table} clear failed (${del.status})`);
-    await this.insertRows(table, rows);
+    if (!del.ok) throw new Error(`${table} cleanup failed (${del.status})`);
   }
 
   private async insertRows(table: string, rows: Record<string, unknown>[]): Promise<void> {

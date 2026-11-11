@@ -48,17 +48,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Stub Supabase auth.jwt()
+      - name: Stub Supabase auth.jwt() and roles
         run: |
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
           create schema if not exists auth;
           create or replace function auth.jwt() returns jsonb
             language sql stable as $$ select '{}'::jsonb $$;
+
+          create role anon nologin;
+          create role authenticated nologin;
+          create role service_role nologin bypassrls;
+
+          grant usage on schema public to anon, authenticated, service_role;
+          alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+          alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
+          grant all on all tables in schema public to anon, authenticated, service_role;
+          grant all on all sequences in schema public to anon, authenticated, service_role;
           SQL
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/chronicle_test
 
-      - name: Apply migrations 001-004
+      - name: Apply migrations 001-006
         run: |
           for f in supabase/migrations/*.sql; do
             echo "Applying $f"
@@ -71,3 +81,72 @@ jobs:
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f .github/workflows/postgres-schema-checks.sql
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/chronicle_test
+
+  adapter-roundtrip:
+    runs-on: ubuntu-latest
+    needs: postgres-schema
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: chronicle_test
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      postgrest:
+        image: postgrest/postgrest:v12.2.8
+        env:
+          PGRST_DB_URI: postgres://postgres:postgres@postgres:5432/chronicle_test
+          PGRST_DB_SCHEMAS: public
+          PGRST_DB_ANON_ROLE: anon
+          PGRST_JWT_SECRET: ci-jwt-secret
+        ports:
+          - 3001:3000
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Stub Supabase auth.jwt() and roles
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          create schema if not exists auth;
+          create or replace function auth.jwt() returns jsonb
+            language sql stable as $$ select '{}'::jsonb $$;
+
+          create role anon nologin;
+          create role authenticated nologin;
+          create role service_role nologin bypassrls;
+
+          grant usage on schema public to anon, authenticated, service_role;
+          alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+          alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
+          grant all on all tables in schema public to anon, authenticated, service_role;
+          grant all on all sequences in schema public to anon, authenticated, service_role;
+          SQL
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/chronicle_test
+
+      - name: Apply migrations 001-006
+        run: |
+          for f in supabase/migrations/*.sql; do
+            echo "Applying $f"
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
+          done
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/chronicle_test
+
+      - name: Adapter save→load→save→load round-trip
+        run: npx tsx scripts/supabase-adapter-roundtrip.mjs
+        env:
+          SUPABASE_URL: http://localhost:3001
+          SUPABASE_SERVICE_ROLE_KEY: ci-adapter-key-unused
+          JWT_SECRET: ci-jwt-secret
